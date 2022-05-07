@@ -56,6 +56,7 @@ func NewPushSession(modOptions ...ModPushSessionOption) *PushSession {
 
 // Push 阻塞直到和对端完成推流前，握手部分的工作（也即收到RTMP Publish response），或者发生错误
 func (s *PushSession) Push(rawUrl string) error {
+	// 已经定义了push session
 	return s.core.Do(rawUrl)
 }
 

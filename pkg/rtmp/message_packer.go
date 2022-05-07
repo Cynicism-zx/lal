@@ -54,6 +54,7 @@ func writeSingleChunkHeader(out []byte, csid int, bodyLen int, typeid uint8, str
 	bele.LePutUint32(out[8:], uint32(streamid))
 }
 
+// ChunkAndWrite 设置rtmp header
 func (packer *MessagePacker) ChunkAndWrite(writer io.Writer, csid int, typeid uint8, streamid int) error {
 	bodyLen := packer.b.Len() - 12
 

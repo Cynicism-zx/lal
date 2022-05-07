@@ -65,6 +65,7 @@ func NewPullSession(modOptions ...ModPullSessionOption) *PullSession {
 //
 func (s *PullSession) Pull(rawUrl string, onReadRtmpAvMsg OnReadRtmpAvMsg) error {
 	s.core.onReadRtmpAvMsg = onReadRtmpAvMsg
+	// 已经定义了pull session
 	return s.core.Do(rawUrl)
 }
 

@@ -132,6 +132,7 @@ func (s *Rtmp2MpegtsRemuxer) onPatPmt(b []byte) {
 	s.observer.OnPatPmt(b)
 }
 
+// onPop 拉流时,判断是否将流保存
 func (s *Rtmp2MpegtsRemuxer) onPop(msg base.RtmpMsg) {
 	switch msg.Header.MsgTypeId {
 	case base.RtmpTypeIdAudio:

@@ -269,7 +269,7 @@ func (m *Muxer) openFragment(ts uint64, discont bool) error {
 	if m.opened {
 		return nazaerrors.Wrap(base.ErrHls)
 	}
-
+	// 将rtmp流保存hls文件
 	id := m.getFragmentId()
 
 	filename := PathStrategy.GetTsFileName(m.streamName, id, int(Clock.Now().UnixNano()/1e6))
@@ -294,7 +294,9 @@ func (m *Muxer) openFragment(ts uint64, discont bool) error {
 	m.fragTs = ts
 
 	// nrm said: start fragment with audio to make iPhone happy
-	m.observer.OnFragmentOpen()
+	if m.observer != nil {
+		m.observer.OnFragmentOpen()
+	}
 
 	return nil
 }

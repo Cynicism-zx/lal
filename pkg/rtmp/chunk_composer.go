@@ -59,7 +59,7 @@ func (c *ChunkComposer) RunLoop(reader io.Reader, cb OnCompleteMessage) error {
 	var aggregateStream *Stream
 	bootstrap := make([]byte, 11)
 	absTsFlag := false
-
+	// TODO:循环去rtmp端持续推,拉流
 	for {
 		// 5.3.1.1. Chunk Basic Header
 		// 读取fmt和csid

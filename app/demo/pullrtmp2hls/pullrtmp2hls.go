@@ -64,8 +64,8 @@ func main() {
 }
 
 func parseFlag() (url string, hlsOutPath string, fragmentDurationMs int, fragmentNum int) {
-	i := flag.String("i", "", "specify pull rtmp url")
-	o := flag.String("o", "", "specify output hls file")
+	i := flag.String("i", "rtmp://127.0.0.1:1935/live/movie", "specify pull rtmp url")
+	o := flag.String("o", "./pullrtmp2hls/", "specify output hls file")
 	d := flag.Int("d", 3000, "specify duration of each ts file in millisecond")
 	n := flag.Int("n", 6, "specify num of ts file in live m3u8 list")
 	flag.Parse()
@@ -73,8 +73,8 @@ func parseFlag() (url string, hlsOutPath string, fragmentDurationMs int, fragmen
 		flag.Usage()
 		eo := filepath.FromSlash("./pullrtmp2hls/")
 		_, _ = fmt.Fprintf(os.Stderr, `Example:
-  %s -i rtmp://127.0.0.1:1935/live/test110 -o %s
-  %s -i rtmp://127.0.0.1:1935/live/test110 -o %s -d 5000 -n 5
+  %s -i rtmp://127.0.0.1:1935/live/movie -o %s
+  %s -i rtmp://127.0.0.1:1935/live/movie -o %s -d 5000 -n 5
 `, os.Args[0], eo, os.Args[0], eo)
 		base.OsExitAndWaitPressIfWindows(1)
 	}
