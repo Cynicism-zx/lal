@@ -20,9 +20,13 @@ import (
 )
 
 type IMuxerObserver interface {
+	OnHlsMakeTs(info base.HlsMakeTsInfo)
+
 	// OnFragmentOpen
 	//
 	// 内部决定开启新的fragment切片，将该事件通知给上层
+	//
+	// TODO(chef): [refactor] 考虑用OnHlsMakeTs替代OnFragmentOpen 202206
 	//
 	OnFragmentOpen()
 }
@@ -234,7 +238,6 @@ func (m *Muxer) updateFragment(ts uint64, boundary bool) error {
 				f.duration = duration
 			}
 		}
-
 		discont = false
 
 		// 已经有TS切片，切片时长没有达到设置的阈值，则不开启新的切片
@@ -298,6 +301,17 @@ func (m *Muxer) openFragment(ts uint64, discont bool) error {
 		m.observer.OnFragmentOpen()
 	}
 
+	m.observer.OnHlsMakeTs(base.HlsMakeTsInfo{
+		Event:          "open",
+		StreamName:     m.streamName,
+		Cwd:            base.GetWd(),
+		TsFile:         filenameWithPath,
+		LiveM3u8File:   m.playlistFilename,
+		RecordM3u8File: m.recordPlayListFilename,
+		Id:             id,
+		Duration:       frag.duration,
+	})
+
 	return nil
 }
 
@@ -326,7 +340,6 @@ func (m *Muxer) closeFragment(isLast bool) error {
 	if m.config.CleanupMode == CleanupModeNever || m.config.CleanupMode == CleanupModeInTheEnd {
 		m.writeRecordPlaylist()
 	}
-
 	if m.config.CleanupMode == CleanupModeAsap {
 		frag := m.getDeleteFrag()
 		if frag.filename != "" {
@@ -336,7 +349,17 @@ func (m *Muxer) closeFragment(isLast bool) error {
 			}
 		}
 	}
-
+	currFrag := m.getClosedFrag()
+	m.observer.OnHlsMakeTs(base.HlsMakeTsInfo{
+		Event:          "close",
+		StreamName:     m.streamName,
+		Cwd:            base.GetWd(),
+		TsFile:         PathStrategy.GetTsFileNameWithPath(m.outPath, currFrag.filename),
+		LiveM3u8File:   m.playlistFilename,
+		RecordM3u8File: m.recordPlayListFilename,
+		Id:             currFrag.id,
+		Duration:       currFrag.duration,
+	})
 	return nil
 }
 
@@ -424,8 +447,7 @@ func (m *Muxer) writePlaylist(isLast bool) {
 }
 
 func (m *Muxer) ensureDir() {
-	//err := fslCtx.RemoveAll(m.outPath)
-	//Log.Assert(nil, err)
+	// 注意，如果路径已经存在，则啥也不干
 	err := fslCtx.MkdirAll(m.outPath, 0777)
 	Log.Assert(nil, err)
 }

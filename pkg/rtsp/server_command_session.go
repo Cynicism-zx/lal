@@ -33,9 +33,15 @@ type IServerCommandSessionObserver interface {
 
 	// OnNewRtspSubSessionDescribe
 	//
-	// @brief Describe阶段回调
-	// @return ok  如果返回false，则表示上层要强制关闭这个拉流请求
-	// @return sdp
+	// Describe阶段回调
+	//
+	// 上层的几种逻辑对应的返回值的组合情况：
+	//
+	// 1. 强制关闭这个session：`ok`设置为false
+	// 2. （当前有sdp）在回调中设置sdp，让session按正常逻辑往下走：`ok`设置为true，`sdp`设置为对应的值
+	// 3. （当前没有sdp）后续在回调外通过 ServerCommandSession.FeedSdp 可以让session按正常逻辑往下走：`ok`设置为true，`sdp`设置为nil
+	//
+	// TODO(chef): bool参数类型统一为error类型 202206
 	//
 	OnNewRtspSubSessionDescribe(session *SubSession) (ok bool, sdp []byte)
 
@@ -54,16 +60,21 @@ type ServerCommandSession struct {
 	prevConnStat connection.Stat
 	staleStat    *connection.Stat
 	stat         base.StatSession
+	authConf     ServerAuthConfig
+	auth         Auth
 
 	pubSession *PubSession
 	subSession *SubSession
+
+	describeSeq string // only for sub session
 }
 
-func NewServerCommandSession(observer IServerCommandSessionObserver, conn net.Conn) *ServerCommandSession {
+func NewServerCommandSession(observer IServerCommandSessionObserver, conn net.Conn, authConf ServerAuthConfig) *ServerCommandSession {
 	uk := base.GenUkRtspServerCommandSession()
 	s := &ServerCommandSession{
 		uniqueKey: uk,
 		observer:  observer,
+		authConf:  authConf,
 		conn: connection.New(conn, func(option *connection.Option) {
 			option.ReadBufSize = serverCommandSessionReadBufSize
 			option.WriteChanSize = serverCommandSessionWriteChanSize
@@ -84,7 +95,7 @@ func (session *ServerCommandSession) Dispose() error {
 }
 
 func (session *ServerCommandSession) FeedSdp(b []byte) {
-
+	session.feedSdp(b)
 }
 
 // WriteInterleavedPacket
@@ -103,6 +114,8 @@ func (session *ServerCommandSession) RemoteAddr() string {
 // ----- ISessionStat --------------------------------------------------------------------------------------------------
 
 func (session *ServerCommandSession) UpdateStat(intervalSec uint32) {
+	// TODO(chef): 梳理interleaved模式下，command session的ISessionStat 202205
+
 	currStat := session.conn.GetStat()
 	rDiff := currStat.ReadBytesSum - session.prevConnStat.ReadBytesSum
 	session.stat.Bitrate = int(rDiff * 8 / 1024 / uint64(intervalSec))
@@ -234,7 +247,7 @@ func (session *ServerCommandSession) handleAnnounce(requestCtx nazahttp.HttpReqM
 	}
 
 	session.pubSession = NewPubSession(urlCtx, session)
-	Log.Infof("[%s] link new PubSession. [%s]", session.uniqueKey, session.pubSession.uniqueKey)
+	Log.Infof("[%s] link new PubSession. [%s]", session.uniqueKey, session.pubSession.UniqueKey())
 	session.pubSession.InitWithSdp(sdpCtx)
 
 	if err = session.observer.OnNewRtspPubSession(session.pubSession); err != nil {
@@ -249,26 +262,83 @@ func (session *ServerCommandSession) handleAnnounce(requestCtx nazahttp.HttpReqM
 func (session *ServerCommandSession) handleDescribe(requestCtx nazahttp.HttpReqMsgCtx) error {
 	Log.Infof("[%s] < R DESCRIBE", session.uniqueKey)
 
+	if session.authConf.AuthEnable {
+		// 鉴权处理
+		authresp, err := session.handleAuthorized(requestCtx)
+		if err != nil {
+			return err
+		}
+
+		if authresp != "" {
+			_, err := session.conn.Write([]byte(authresp))
+			return err
+		}
+	}
+
 	urlCtx, err := base.ParseRtspUrl(requestCtx.Uri)
 	if err != nil {
 		Log.Errorf("[%s] parse presentation failed. uri=%s", session.uniqueKey, requestCtx.Uri)
 		return err
 	}
 
+	session.describeSeq = requestCtx.Headers.Get(HeaderCSeq)
+
 	session.subSession = NewSubSession(urlCtx, session)
-	Log.Infof("[%s] link new SubSession. [%s]", session.uniqueKey, session.subSession.uniqueKey)
+	Log.Infof("[%s] link new SubSession. [%s]", session.uniqueKey, session.subSession.UniqueKey())
 	ok, rawSdp := session.observer.OnNewRtspSubSessionDescribe(session.subSession)
 	if !ok {
 		Log.Warnf("[%s] force close subSession.", session.uniqueKey)
 		return base.ErrRtspClosedByObserver
 	}
 
+	if rawSdp != nil {
+		return session.feedSdp(rawSdp)
+	}
+	return nil
+}
+
+func (session *ServerCommandSession) feedSdp(rawSdp []byte) error {
 	sdpCtx, _ := sdp.ParseSdp2LogicContext(rawSdp)
 	session.subSession.InitWithSdp(sdpCtx)
 
-	resp := PackResponseDescribe(requestCtx.Headers.Get(HeaderCSeq), string(rawSdp))
-	_, err = session.conn.Write([]byte(resp))
+	resp := PackResponseDescribe(session.describeSeq, string(rawSdp))
+	_, err := session.conn.Write([]byte(resp))
 	return err
+}
+
+func (session *ServerCommandSession) handleAuthorized(requestCtx nazahttp.HttpReqMsgCtx) (string, error) {
+	if requestCtx.Headers.Get(HeaderAuthorization) != "" {
+		authorization := requestCtx.Headers.Get(HeaderAuthorization)
+		session.auth.ParseAuthorization(authorization)
+
+		// 解析出的鉴权方式需要与配置的鉴权方式一致,防止鉴权降级
+		if session.auth.Typ == AuthTypeBasic && session.authConf.AuthMethod == 0 ||
+			session.auth.Typ == AuthTypeDigest && session.authConf.AuthMethod == 1 {
+			if session.auth.CheckAuthorization(requestCtx.Method, session.authConf.UserName, session.authConf.PassWord) {
+				return "", nil
+			}
+		}
+
+		// TODO(chef): [refactor] 错误放入base/error.go中 202205
+		err := fmt.Errorf("rtsp auth failed, auth:%s", authorization)
+		return "", err
+	} else {
+		if session.authConf.AuthMethod == 0 {
+			// Basic鉴权
+			authenticate := session.auth.MakeAuthenticate(AuthTypeBasic)
+			resp := PackResponseAuthorized(requestCtx.Headers.Get(HeaderCSeq), authenticate)
+			return resp, nil
+		} else if session.authConf.AuthMethod == 1 {
+			// Digest鉴权
+			authenticate := session.auth.MakeAuthenticate(AuthTypeDigest)
+			resp := PackResponseAuthorized(requestCtx.Headers.Get(HeaderCSeq), authenticate)
+			return resp, nil
+		} else {
+			// TODO(chef): [refactor] 错误放入base/error.go中 202205
+			err := fmt.Errorf("unsupport, auth method:%d", session.authConf.AuthMethod)
+			return "", err
+		}
+	}
 }
 
 // 一次SETUP对应一路流（音频或视频）

@@ -14,7 +14,11 @@ package rtmp
 
 import (
 	"bytes"
+	"encoding/hex"
+	"fmt"
+	"github.com/q191201771/naza/pkg/nazabytes"
 	"io"
+	"strings"
 
 	"github.com/q191201771/lal/pkg/base"
 	"github.com/q191201771/naza/pkg/nazaerrors"
@@ -46,9 +50,11 @@ const (
 
 var Amf0TypeMarkerObjectEndBytes = []byte{0, 0, Amf0TypeMarkerObjectEnd}
 
+// ---------------------------------------------------------------------------------------------------------------------
+
 type ObjectPair struct {
 	Key   string
-	Value interface{}
+	Value interface{} // TODO(chef): [perf] 考虑换成泛型 202206
 }
 
 type ObjectPairArray []ObjectPair
@@ -84,11 +90,19 @@ func (o ObjectPairArray) FindNumber(key string) (int, error) {
 	return -1, base.ErrAmfNotExist
 }
 
+func (o ObjectPairArray) DebugString() string {
+	var b strings.Builder
+	for _, v := range o {
+		b.WriteString(fmt.Sprintf("%s: %+v\n", v.Key, v.Value))
+	}
+	return b.String()
+}
+
+// ---------------------------------------------------------------------------------------------------------------------
+
 type amf0 struct{}
 
 var Amf0 amf0
-
-// ----------------------------------------------------------------------------
 
 func (amf0) WriteNumber(writer io.Writer, val float64) error {
 	if _, err := writer.Write([]byte{Amf0TypeMarkerNumber}); err != nil {
@@ -150,8 +164,14 @@ func (amf0) WriteObject(writer io.Writer, opa ObjectPairArray) error {
 			if err := Amf0.WriteString(writer, opa[i].Value.(string)); err != nil {
 				return err
 			}
-		case int:
-			if err := Amf0.WriteNumber(writer, float64(opa[i].Value.(int))); err != nil {
+		case int, float64:
+			var numberVal float64
+			if intval, ok := opa[i].Value.(int); ok {
+				numberVal = float64(intval)
+			} else if floatVal, ok := opa[i].Value.(float64); ok {
+				numberVal = floatVal
+			}
+			if err := Amf0.WriteNumber(writer, numberVal); err != nil {
 				return err
 			}
 		case bool:
@@ -271,8 +291,8 @@ func (amf0) ReadObject(b []byte) (ObjectPairArray, int, error) {
 		}
 		vt := b[index]
 		switch vt {
-		case Amf0TypeMarkerString:
-			v, l, err := Amf0.ReadString(b[index:])
+		case Amf0TypeMarkerNumber:
+			v, l, err := Amf0.ReadNumber(b[index:])
 			if err != nil {
 				return nil, 0, err
 			}
@@ -285,15 +305,15 @@ func (amf0) ReadObject(b []byte) (ObjectPairArray, int, error) {
 			}
 			ops = append(ops, ObjectPair{k, v})
 			index += l
-		case Amf0TypeMarkerNumber:
-			v, l, err := Amf0.ReadNumber(b[index:])
+		case Amf0TypeMarkerString:
+			v, l, err := Amf0.ReadString(b[index:])
 			if err != nil {
 				return nil, 0, err
 			}
 			ops = append(ops, ObjectPair{k, v})
 			index += l
-		case Amf0TypeMarkerEcmaArray:
-			v, l, err := Amf0.ReadArray(b[index:])
+		case Amf0TypeMarkerObject:
+			v, l, err := Amf0.ReadObject(b[index:])
 			if err != nil {
 				return nil, 0, err
 			}
@@ -305,8 +325,15 @@ func (amf0) ReadObject(b []byte) (ObjectPairArray, int, error) {
 				return nil, 0, err
 			}
 			index += l
+		case Amf0TypeMarkerEcmaArray:
+			v, l, err := Amf0.ReadArray(b[index:])
+			if err != nil {
+				return nil, 0, err
+			}
+			ops = append(ops, ObjectPair{k, v})
+			index += l
 		default:
-			Log.Panicf("unknown type. vt=%d", vt)
+			Log.Panicf("unknown type. vt=%d, hex=%s", vt, hex.Dump(nazabytes.Prefix(b, 4096)))
 		}
 	}
 }

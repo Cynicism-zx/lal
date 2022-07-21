@@ -39,8 +39,9 @@ type ILalServer interface {
 	StatLalInfo() base.LalInfo
 	StatAllGroup() (sgs []base.StatGroup)
 	StatGroup(streamName string) *base.StatGroup
-	CtrlStartRelayPull(info base.ApiCtrlStartRelayPullReq) (string, error)
-	CtrlKickOutSession(info base.ApiCtrlKickOutSession) base.HttpResponseBasic
+	CtrlStartRelayPull(info base.ApiCtrlStartRelayPullReq) base.ApiCtrlStartRelayPull
+	CtrlStopRelayPull(streamName string) base.ApiCtrlStopRelayPull
+	CtrlKickSession(info base.ApiCtrlKickSession) base.HttpResponseBasic
 }
 
 // NewLalServer 创建一个lal server
@@ -73,7 +74,10 @@ type INotifyHandler interface {
 	OnPubStop(info base.PubStopInfo)
 	OnSubStart(info base.SubStartInfo)
 	OnSubStop(info base.SubStopInfo)
+	OnRelayPullStart(info base.PullStartInfo)
+	OnRelayPullStop(info base.PullStopInfo)
 	OnRtmpConnect(info base.RtmpConnectInfo)
+	OnHlsMakeTs(info base.HlsMakeTsInfo)
 }
 
 type Option struct {

@@ -26,6 +26,7 @@ const (
 	DefaultHttpPort  = 80
 	DefaultHttpsPort = 443
 	DefaultRtspPort  = 554
+	DefaultRtmpsPort = 443
 )
 
 type UrlPathContext struct {
@@ -52,7 +53,7 @@ type UrlContext struct {
 	Path                string
 	PathWithoutLastItem string // 注意，没有前面的'/'，也没有后面的'/'
 	LastItemOfPath      string // 注意，没有前面的'/'
-	RawQuery            string
+	RawQuery            string // 参数
 
 	RawUrlWithoutUserInfo string
 
@@ -109,6 +110,8 @@ func ParseUrl(rawUrl string, defaultPort int) (ctx UrlContext, err error) {
 			defaultPort = DefaultRtmpPort
 		case "rtsp":
 			defaultPort = DefaultRtspPort
+		case "rtmps":
+			defaultPort = DefaultRtmpsPort
 		}
 	}
 
@@ -160,7 +163,7 @@ func ParseRtmpUrl(rawUrl string) (ctx UrlContext, err error) {
 	if err != nil {
 		return
 	}
-	if ctx.Scheme != "rtmp" || ctx.Host == "" || ctx.Path == "" {
+	if ctx.Scheme != "rtmp" && ctx.Scheme != "rtmps" || ctx.Host == "" || ctx.Path == "" {
 		return ctx, fmt.Errorf("%w. url=%s", ErrInvalidUrl, rawUrl)
 	}
 

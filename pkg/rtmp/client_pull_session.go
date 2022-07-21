@@ -19,22 +19,27 @@ type PullSession struct {
 }
 
 type PullSessionOption struct {
+	// PullTimeoutMs
+	//
 	// 从调用Pull函数，到接收音视频数据的前一步，也即收到服务端返回的rtmp play对应结果的信令的超时时间
 	// 如果为0，则没有超时时间
+	//
 	PullTimeoutMs int
 
-	ReadAvTimeoutMs      int
-	ReadBufSize          int // io层读取音视频数据时的缓冲大小，如果为0，则没有缓冲
-	HandshakeComplexFlag bool
-	PeerWinAckSize       int
+	ReadAvTimeoutMs            int
+	ReadBufSize                int // io层读取音视频数据时的缓冲大小，如果为0，则没有缓冲
+	HandshakeComplexFlag       bool
+	PeerWinAckSize             int
+	ReuseReadMessageBufferFlag bool // 接收Message时，是否复用内存块
 }
 
 var defaultPullSessionOption = PullSessionOption{
-	PullTimeoutMs:        10000,
-	ReadAvTimeoutMs:      0,
-	ReadBufSize:          0,
-	HandshakeComplexFlag: false,
-	PeerWinAckSize:       0,
+	PullTimeoutMs:              10000,
+	ReadAvTimeoutMs:            0,
+	ReadBufSize:                0,
+	HandshakeComplexFlag:       false,
+	PeerWinAckSize:             0,
+	ReuseReadMessageBufferFlag: true,
 }
 
 type ModPullSessionOption func(option *PullSessionOption)
@@ -46,12 +51,13 @@ func NewPullSession(modOptions ...ModPullSessionOption) *PullSession {
 	}
 
 	return &PullSession{
-		core: NewClientSession(CstPullSession, func(option *ClientSessionOption) {
+		core: NewClientSession(base.SessionTypeRtmpPull, func(option *ClientSessionOption) {
 			option.DoTimeoutMs = opt.PullTimeoutMs
 			option.ReadAvTimeoutMs = opt.ReadAvTimeoutMs
 			option.ReadBufSize = opt.ReadBufSize
 			option.HandshakeComplexFlag = opt.HandshakeComplexFlag
 			option.PeerWinAckSize = opt.PeerWinAckSize
+			option.ReuseReadMessageBufferFlag = opt.ReuseReadMessageBufferFlag
 		}),
 	}
 }
@@ -68,10 +74,15 @@ func (s *PullSession) WithOnPullSucc(onPullResult func()) *PullSession {
 // WithOnReadRtmpAvMsg
 //
 // @param onReadRtmpAvMsg:
-//  msg: 注意，回调结束后，`msg`的内存块会被`PullSession`重复使用。
-//       也即多次回调的`msg`是复用的同一块内存块。
-//       如果业务方需要在回调结束后，依然持有`msg`，那么需要对`msg`进行拷贝，比如调用`msg.Clone()`。
-//       只在回调中使用`msg`，则不需要拷贝。
+//  msg: 关于内存块的说明：
+//    ReuseReadMessageBufferFlag 为true时：
+//      回调结束后，`msg`的内存块会被`PullSession`重复使用。
+//      也即多次回调的`msg`是复用的同一块内存块。
+//      如果业务方需要在回调结束后，依然持有`msg`，那么需要对`msg`进行拷贝，比如调用`msg.Clone()`。
+//      只在回调中使用`msg`，则不需要拷贝。
+//    ReuseReadMessageBufferFlag 为false时：
+//      回调接收后，`PullSession`不再使用该内存块。
+//      业务方可以自由持有释放该内存块。
 //
 func (s *PullSession) WithOnReadRtmpAvMsg(onReadRtmpAvMsg OnReadRtmpAvMsg) *PullSession {
 	s.core.onReadRtmpAvMsg = onReadRtmpAvMsg
@@ -126,8 +137,10 @@ func (s *PullSession) RawQuery() string {
 
 // UniqueKey 文档请参考： interface IObject
 func (s *PullSession) UniqueKey() string {
-	return s.core.uniqueKey
+	return s.core.UniqueKey()
 }
+
+// ----- ISessionStat --------------------------------------------------------------------------------------------------
 
 // GetStat 文档请参考： interface ISessionStat
 func (s *PullSession) GetStat() base.StatSession {

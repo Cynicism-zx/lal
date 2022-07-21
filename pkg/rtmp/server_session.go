@@ -56,7 +56,6 @@ const (
 )
 
 type ServerSession struct {
-	uniqueKey              string // const after ctor
 	url                    string
 	tcUrl                  string
 	streamNameWithRawQuery string // const after set
@@ -65,15 +64,12 @@ type ServerSession struct {
 	rawQuery               string //const after set
 
 	observer      IServerSessionObserver
-	t             ServerSessionType
 	hs            HandshakeServer
 	chunkComposer *ChunkComposer
 	packer        *MessagePacker
 
-	conn         connection.Connection
-	prevConnStat connection.Stat
-	staleStat    *connection.Stat
-	stat         base.StatSession
+	conn        connection.Connection
+	sessionStat base.BasicSessionStat
 
 	// only for PubSession
 	avObserver IPubSessionObserver
@@ -98,26 +94,18 @@ type ServerSession struct {
 }
 
 func NewServerSession(observer IServerSessionObserver, conn net.Conn) *ServerSession {
-	uk := base.GenUkRtmpServerSession()
 	s := &ServerSession{
 		conn: connection.New(conn, func(option *connection.Option) {
 			option.ReadBufSize = readBufSize
 		}),
-		stat: base.StatSession{
-			Protocol:   base.ProtocolRtmp,
-			SessionId:  uk,
-			StartTime:  base.ReadableNowTime(),
-			RemoteAddr: conn.RemoteAddr().String(),
-		},
-		uniqueKey:               uk,
+		sessionStat:             base.NewBasicSessionStat(base.SessionTypeRtmpServerSession, conn.RemoteAddr().String()),
 		observer:                observer,
-		t:                       ServerSessionTypeUnknown,
 		chunkComposer:           NewChunkComposer(),
 		packer:                  NewMessagePacker(),
 		IsFresh:                 true,
 		ShouldWaitVideoKeyFrame: true,
 	}
-	Log.Infof("[%s] lifecycle new rtmp ServerSession. session=%p, remote addr=%s", uk, s, conn.RemoteAddr().String())
+	Log.Infof("[%s] lifecycle new rtmp ServerSession. session=%p, remote addr=%s", s.UniqueKey(), s, conn.RemoteAddr().String())
 	return s
 }
 
@@ -147,9 +135,13 @@ func (s *ServerSession) Flush() error {
 	return s.conn.Flush()
 }
 
+// ----- IServerSessionLifecycle ---------------------------------------------------------------------------------------
+
 func (s *ServerSession) Dispose() error {
 	return s.dispose(nil)
 }
+
+// ----- ISessionUrlContext --------------------------------------------------------------------------------------------
 
 func (s *ServerSession) Url() string {
 	return s.url
@@ -167,45 +159,27 @@ func (s *ServerSession) RawQuery() string {
 	return s.rawQuery
 }
 
+// ----- IObject -------------------------------------------------------------------------------------------------------
+
 func (s *ServerSession) UniqueKey() string {
-	return s.uniqueKey
+	return s.sessionStat.UniqueKey()
 }
 
+// ----- ISessionStat --------------------------------------------------------------------------------------------------
+
 func (s *ServerSession) UpdateStat(intervalSec uint32) {
-	currStat := s.conn.GetStat()
-	rDiff := currStat.ReadBytesSum - s.prevConnStat.ReadBytesSum
-	s.stat.ReadBitrate = int(rDiff * 8 / 1024 / uint64(intervalSec))
-	wDiff := currStat.WroteBytesSum - s.prevConnStat.WroteBytesSum
-	s.stat.WriteBitrate = int(wDiff * 8 / 1024 / uint64(intervalSec))
-	switch s.t {
-	case ServerSessionTypePub:
-		s.stat.Bitrate = s.stat.ReadBitrate
-	case ServerSessionTypeSub:
-		s.stat.Bitrate = s.stat.WriteBitrate
-	}
-	s.prevConnStat = currStat
+	s.sessionStat.UpdateStatWitchConn(s.conn, intervalSec)
 }
 
 func (s *ServerSession) GetStat() base.StatSession {
-	connStat := s.conn.GetStat()
-	s.stat.ReadBytesSum = connStat.ReadBytesSum
-	s.stat.WroteBytesSum = connStat.WroteBytesSum
-	return s.stat
+	return s.sessionStat.GetStatWithConn(s.conn)
 }
 
 func (s *ServerSession) IsAlive() (readAlive, writeAlive bool) {
-	currStat := s.conn.GetStat()
-	if s.staleStat == nil {
-		s.staleStat = new(connection.Stat)
-		*s.staleStat = currStat
-		return true, true
-	}
-
-	readAlive = !(currStat.ReadBytesSum-s.staleStat.ReadBytesSum == 0)
-	writeAlive = !(currStat.WroteBytesSum-s.staleStat.WroteBytesSum == 0)
-	*s.staleStat = currStat
-	return
+	return s.sessionStat.IsAliveWitchConn(s.conn)
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
 
 func (s *ServerSession) runReadLoop() error {
 	return s.chunkComposer.RunLoop(s.conn, s.doMsg)
@@ -215,9 +189,9 @@ func (s *ServerSession) handshake() error {
 	if err := s.hs.ReadC0C1(s.conn); err != nil {
 		return err
 	}
-	Log.Infof("[%s] < R Handshake C0+C1.", s.uniqueKey)
+	Log.Infof("[%s] < R Handshake C0+C1.", s.UniqueKey())
 
-	Log.Infof("[%s] > W Handshake S0+S1+S2.", s.uniqueKey)
+	Log.Infof("[%s] > W Handshake S0+S1+S2.", s.UniqueKey())
 	if err := s.hs.WriteS0S1S2(s.conn); err != nil {
 		return err
 	}
@@ -225,7 +199,7 @@ func (s *ServerSession) handshake() error {
 	if err := s.hs.ReadC2(s.conn); err != nil {
 		return err
 	}
-	Log.Infof("[%s] < R Handshake C2.", s.uniqueKey)
+	Log.Infof("[%s] < R Handshake C2.", s.UniqueKey())
 	return nil
 }
 
@@ -248,12 +222,12 @@ func (s *ServerSession) doMsg(stream *Stream) error {
 	case base.RtmpTypeIdAudio:
 		fallthrough
 	case base.RtmpTypeIdVideo:
-		if s.t != ServerSessionTypePub {
+		if s.sessionStat.BaseType() != base.SessionBaseTypePubStr {
 			return nazaerrors.Wrap(base.ErrRtmpUnexpectedMsg)
 		}
 		s.avObserver.OnReadRtmpAvMsg(stream.toAvMsg())
 	default:
-		Log.Warnf("[%s] read unknown message. typeid=%d, %s", s.uniqueKey, stream.header.MsgTypeId, stream.toDebugString())
+		Log.Warnf("[%s] read unknown message. typeid=%d, %s", s.UniqueKey(), stream.header.MsgTypeId, stream.toDebugString())
 
 	}
 	return nil
@@ -261,7 +235,7 @@ func (s *ServerSession) doMsg(stream *Stream) error {
 
 func (s *ServerSession) doAck(stream *Stream) error {
 	seqNum := bele.BeUint32(stream.msg.buff.Bytes())
-	Log.Infof("[%s] < R Acknowledgement. ignore. sequence number=%d.", s.uniqueKey, seqNum)
+	Log.Infof("[%s] < R Acknowledgement. ignore. sequence number=%d.", s.UniqueKey(), seqNum)
 	return nil
 }
 func (s *ServerSession) doUserControl(stream *Stream) error {
@@ -274,7 +248,7 @@ func (s *ServerSession) doUserControl(stream *Stream) error {
 	return nil
 }
 func (s *ServerSession) doDataMessageAmf0(stream *Stream) error {
-	if s.t != ServerSessionTypePub {
+	if s.sessionStat.BaseType() != base.SessionBaseTypePubStr {
 		return nazaerrors.Wrap(base.ErrRtmpUnexpectedMsg)
 	}
 
@@ -285,7 +259,7 @@ func (s *ServerSession) doDataMessageAmf0(stream *Stream) error {
 
 	switch val {
 	case "|RtmpSampleAccess":
-		Log.Debugf("[%s] < R |RtmpSampleAccess, ignore.", s.uniqueKey)
+		Log.Debugf("[%s] < R |RtmpSampleAccess, ignore.", s.UniqueKey())
 		return nil
 	default:
 	}
@@ -300,7 +274,7 @@ func (s *ServerSession) doDataMessageAmf0(stream *Stream) error {
 	//
 	//switch val {
 	//case "|RtmpSampleAccess":
-	//	Log.Warnf("[%s] read data message, ignore it. val=%s", s.uniqueKey, val)
+	//	Log.Warnf("[%s] read data message, ignore it. val=%s", s.UniqueKey(), val)
 	//	return nil
 	//case "@setDataFrame":
 	//	// macos obs and ffmpeg
@@ -312,13 +286,13 @@ func (s *ServerSession) doDataMessageAmf0(stream *Stream) error {
 	//		return err
 	//	}
 	//	if val != "onMetaData" {
-	//		Log.Errorf("[%s] read unknown data message. val=%s, %s", s.uniqueKey, val, stream.toDebugString())
+	//		Log.Errorf("[%s] read unknown data message. val=%s, %s", s.UniqueKey(), val, stream.toDebugString())
 	//		return ErrRtmp
 	//	}
 	//case "onMetaData":
 	//	// noop
 	//default:
-	//	Log.Errorf("[%s] read unknown data message. val=%s, %s", s.uniqueKey, val, stream.toDebugString())
+	//	Log.Errorf("[%s] read unknown data message. val=%s, %s", s.UniqueKey(), val, stream.toDebugString())
 	//	return nil
 	//}
 	//
@@ -354,9 +328,9 @@ func (s *ServerSession) doCommandMessage(stream *Stream) error {
 	case "getStreamLength":
 		fallthrough
 	case "deleteStream":
-		Log.Debugf("[%s] read command message, ignore it. cmd=%s, %s", s.uniqueKey, cmd, stream.toDebugString())
+		Log.Debugf("[%s] read command message, ignore it. cmd=%s, %s", s.UniqueKey(), cmd, stream.toDebugString())
 	default:
-		Log.Errorf("[%s] read unknown command message. cmd=%s, %s", s.uniqueKey, cmd, stream.toDebugString())
+		Log.Errorf("[%s] read unknown command message. cmd=%s, %s", s.UniqueKey(), cmd, stream.toDebugString())
 	}
 	return nil
 }
@@ -378,28 +352,28 @@ func (s *ServerSession) doConnect(tid int, stream *Stream) error {
 	}
 	s.tcUrl, err = val.FindString("tcUrl")
 	if err != nil {
-		Log.Warnf("[%s] tcUrl not exist.", s.uniqueKey)
+		Log.Warnf("[%s] tcUrl not exist.", s.UniqueKey())
 	}
-	Log.Infof("[%s] < R connect('%s'). tcUrl=%s", s.uniqueKey, s.appName, s.tcUrl)
+	Log.Infof("[%s] < R connect('%s'). tcUrl=%s", s.UniqueKey(), s.appName, s.tcUrl)
 
 	s.observer.OnRtmpConnect(s, val)
 
-	Log.Infof("[%s] > W Window Acknowledgement Size %d.", s.uniqueKey, windowAcknowledgementSize)
+	Log.Infof("[%s] > W Window Acknowledgement Size %d.", s.UniqueKey(), windowAcknowledgementSize)
 	if err := s.packer.writeWinAckSize(s.conn, windowAcknowledgementSize); err != nil {
 		return err
 	}
 
-	Log.Infof("[%s] > W Set Peer Bandwidth.", s.uniqueKey)
+	Log.Infof("[%s] > W Set Peer Bandwidth.", s.UniqueKey())
 	if err := s.packer.writePeerBandwidth(s.conn, peerBandwidth, peerBandwidthLimitTypeDynamic); err != nil {
 		return err
 	}
 
-	Log.Infof("[%s] > W SetChunkSize %d.", s.uniqueKey, LocalChunkSize)
+	Log.Infof("[%s] > W SetChunkSize %d.", s.UniqueKey(), LocalChunkSize)
 	if err := s.packer.writeChunkSize(s.conn, LocalChunkSize); err != nil {
 		return err
 	}
 
-	Log.Infof("[%s] > W _result('NetConnection.Connect.Success').", s.uniqueKey)
+	Log.Infof("[%s] > W _result('NetConnection.Connect.Success').", s.UniqueKey())
 	oe, err := val.FindNumber("objectEncoding")
 	if oe != 0 && oe != 3 {
 		oe = 0
@@ -411,8 +385,8 @@ func (s *ServerSession) doConnect(tid int, stream *Stream) error {
 }
 
 func (s *ServerSession) doCreateStream(tid int, stream *Stream) error {
-	Log.Infof("[%s] < R createStream().", s.uniqueKey)
-	Log.Infof("[%s] > W _result().", s.uniqueKey)
+	Log.Infof("[%s] < R createStream().", s.UniqueKey())
+	Log.Infof("[%s] > W _result().", s.UniqueKey())
 	if err := s.packer.writeCreateStreamResult(s.conn, tid); err != nil {
 		return err
 	}
@@ -439,10 +413,10 @@ func (s *ServerSession) doPublish(tid int, stream *Stream) (err error) {
 	if err != nil {
 		return err
 	}
-	Log.Debugf("[%s] pubType=%s", s.uniqueKey, pubType)
-	Log.Infof("[%s] < R publish('%s')", s.uniqueKey, s.streamNameWithRawQuery)
+	Log.Debugf("[%s] pubType=%s", s.UniqueKey(), pubType)
+	Log.Infof("[%s] < R publish('%s')", s.UniqueKey(), s.streamNameWithRawQuery)
 
-	Log.Infof("[%s] > W onStatus('NetStream.Publish.Start').", s.uniqueKey)
+	Log.Infof("[%s] > W onStatus('NetStream.Publish.Start').", s.UniqueKey())
 	if err = s.packer.writeOnStatusPublish(s.conn, Msid1); err != nil {
 		return err
 	}
@@ -450,7 +424,7 @@ func (s *ServerSession) doPublish(tid int, stream *Stream) (err error) {
 	// 回复完信令后修改 connection 的属性
 	s.modConnProps()
 
-	s.t = ServerSessionTypePub
+	s.sessionStat.SetBaseType(base.SessionBaseTypePubStr)
 	err = s.observer.OnNewRtmpPubSession(s)
 	if err != nil {
 		s.DisposeByObserverFlag = true
@@ -474,7 +448,7 @@ func (s *ServerSession) doPlay(tid int, stream *Stream) (err error) {
 
 	s.url = fmt.Sprintf("%s/%s", s.tcUrl, s.streamNameWithRawQuery)
 
-	Log.Infof("[%s] < R play('%s').", s.uniqueKey, s.streamNameWithRawQuery)
+	Log.Infof("[%s] < R play('%s').", s.UniqueKey(), s.streamNameWithRawQuery)
 	// TODO chef: start duration reset
 
 	if err := s.packer.writeStreamIsRecorded(s.conn, Msid1); err != nil {
@@ -484,7 +458,7 @@ func (s *ServerSession) doPlay(tid int, stream *Stream) (err error) {
 		return err
 	}
 
-	Log.Infof("[%s] > W onStatus('NetStream.Play.Start').", s.uniqueKey)
+	Log.Infof("[%s] > W onStatus('NetStream.Play.Start').", s.UniqueKey())
 	if err := s.packer.writeOnStatusPlay(s.conn, Msid1); err != nil {
 		return err
 	}
@@ -492,7 +466,7 @@ func (s *ServerSession) doPlay(tid int, stream *Stream) (err error) {
 	// 回复完信令后修改 connection 的属性
 	s.modConnProps()
 
-	s.t = ServerSessionTypeSub
+	s.sessionStat.SetBaseType(base.SessionBaseTypeSubStr)
 	err = s.observer.OnNewRtmpSubSession(s)
 	if err != nil {
 		s.DisposeByObserverFlag = true
@@ -503,10 +477,10 @@ func (s *ServerSession) doPlay(tid int, stream *Stream) (err error) {
 func (s *ServerSession) modConnProps() {
 	s.conn.ModWriteChanSize(wChanSize)
 
-	switch s.t {
-	case ServerSessionTypePub:
+	switch s.sessionStat.BaseType() {
+	case base.SessionBaseTypePubStr:
 		s.conn.ModReadTimeoutMs(serverSessionReadAvTimeoutMs)
-	case ServerSessionTypeSub:
+	case base.SessionBaseTypeSubStr:
 		s.conn.ModWriteTimeoutMs(serverSessionWriteAvTimeoutMs)
 	}
 }
@@ -514,7 +488,7 @@ func (s *ServerSession) modConnProps() {
 func (s *ServerSession) dispose(err error) error {
 	var retErr error
 	s.disposeOnce.Do(func() {
-		Log.Infof("[%s] lifecycle dispose rtmp ServerSession. err=%+v", s.uniqueKey, err)
+		Log.Infof("[%s] lifecycle dispose rtmp ServerSession. err=%+v", s.UniqueKey(), err)
 		if s.conn == nil {
 			retErr = base.ErrSessionNotStarted
 			return

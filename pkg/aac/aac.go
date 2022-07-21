@@ -10,6 +10,7 @@ package aac
 
 import (
 	"fmt"
+	"github.com/q191201771/naza/pkg/nazalog"
 
 	"github.com/q191201771/naza/pkg/nazaerrors"
 
@@ -31,9 +32,19 @@ import (
 const (
 	AdtsHeaderLength = 7
 
+	AscSamplingFrequencyIndex96000 = 0
+	AscSamplingFrequencyIndex88200 = 1
+	AscSamplingFrequencyIndex64000 = 2
 	AscSamplingFrequencyIndex48000 = 3
 	AscSamplingFrequencyIndex44100 = 4
+	AscSamplingFrequencyIndex32000 = 5
+	AscSamplingFrequencyIndex24000 = 6
 	AscSamplingFrequencyIndex22050 = 7
+	AscSamplingFrequencyIndex16000 = 8
+	AscSamplingFrequencyIndex12000 = 9
+	AscSamplingFrequencyIndex11025 = 10
+	AscSamplingFrequencyIndex8000  = 11
+	AscSamplingFrequencyIndex7350  = 12
 )
 
 const (
@@ -49,7 +60,7 @@ const (
 // <1.6.3.4 channelConfiguration>
 // --------------------------------------------------------
 // audio object type      [5b] 1=AAC MAIN  2=AAC LC
-// samplingFrequencyIndex [4b] 3=48000, 4=44100, 5=32000, 6=24000, 7=22050, 11=11025
+// samplingFrequencyIndex [4b] 0=96000, 1=88200, 2=64000, 3=48000, 4=44100, 5=32000, 6=24000, 7=22050, 8=16000, 9=12000, 10=11025, 11=11025, 12=7350
 // channelConfiguration   [4b] 1=center front speaker  2=left, right front speakers
 //
 type AscContext struct {
@@ -150,6 +161,11 @@ func (ascCtx *AscContext) PackToAdtsHeader(out []byte, frameLength int) error {
 	// ID, Layer, protection_absent 1(4)
 	bw.WriteBits8(4, 0x1)
 	// 2(2)
+	// <ISO_IEC_14496-3.pdf>
+	// profile_ObjectType: The interpretation of this bitstream element depends on the value of the ID bit. If ID is
+	// equal to ‘1’ this field holds the same information as the profile field in the ADTS stream defined in ISO/IEC
+	// 13818-7. If ID is equal to ‘0’ this element denotes the MPEG-4 Audio Object Type according to the table
+	// defined in subclause 5.1.1.
 	bw.WriteBits8(2, ascCtx.AudioObjectType-1)
 	// 2(4)
 	bw.WriteBits8(4, ascCtx.SamplingFrequencyIndex)
@@ -169,13 +185,39 @@ func (ascCtx *AscContext) PackToAdtsHeader(out []byte, frameLength int) error {
 }
 
 func (ascCtx *AscContext) GetSamplingFrequency() (int, error) {
+	// 临时日志，观察不常见的采样率
 	switch ascCtx.SamplingFrequencyIndex {
+	case AscSamplingFrequencyIndex48000, AscSamplingFrequencyIndex44100, AscSamplingFrequencyIndex22050:
+		// noop
+	default:
+		nazalog.Warnf("unusual sampling frequency. ascCtx=%+v", ascCtx)
+	}
+
+	switch ascCtx.SamplingFrequencyIndex {
+	case AscSamplingFrequencyIndex96000:
+		return 96000, nil
+	case AscSamplingFrequencyIndex88200:
+		return 88200, nil
+	case AscSamplingFrequencyIndex64000:
+		return 64000, nil
 	case AscSamplingFrequencyIndex48000:
 		return 48000, nil
 	case AscSamplingFrequencyIndex44100:
 		return 44100, nil
+	case AscSamplingFrequencyIndex32000:
+		return 32000, nil
 	case AscSamplingFrequencyIndex22050:
 		return 22050, nil
+	case AscSamplingFrequencyIndex16000:
+		return 16000, nil
+	case AscSamplingFrequencyIndex12000:
+		return 12000, nil
+	case AscSamplingFrequencyIndex11025:
+		return 11025, nil
+	case AscSamplingFrequencyIndex8000:
+		return 8000, nil
+	case AscSamplingFrequencyIndex7350:
+		return 7350, nil
 	}
 	return -1, fmt.Errorf("%w. asCtx=%+v", base.ErrSamplingFrequencyIndex, ascCtx)
 }
@@ -206,6 +248,11 @@ func (ctx *AdtsHeaderContext) Unpack(adtsHeader []byte) error {
 	br := nazabits.NewBitReader(adtsHeader)
 	_ = br.SkipBits(16)
 	v, _ := br.ReadBits8(2)
+	// <ISO_IEC_14496-3.pdf>
+	// profile_ObjectType: The interpretation of this bitstream element depends on the value of the ID bit. If ID is
+	// equal to ‘1’ this field holds the same information as the profile field in the ADTS stream defined in ISO/IEC
+	// 13818-7. If ID is equal to ‘0’ this element denotes the MPEG-4 Audio Object Type according to the table
+	// defined in subclause 5.1.1.
 	ctx.AscCtx.AudioObjectType = v + 1
 	ctx.AscCtx.SamplingFrequencyIndex, _ = br.ReadBits8(4)
 	_ = br.SkipBits(1)

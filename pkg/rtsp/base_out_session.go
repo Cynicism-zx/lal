@@ -21,14 +21,12 @@ import (
 
 	"github.com/q191201771/lal/pkg/base"
 	"github.com/q191201771/lal/pkg/sdp"
-	"github.com/q191201771/naza/pkg/connection"
 	"github.com/q191201771/naza/pkg/nazanet"
 )
 
 // BaseOutSession out的含义是音视频由本端发送至对端
 //
 type BaseOutSession struct {
-	uniqueKey  string
 	cmdSession IInterleavedPacketWriter
 
 	sdpCtx sdp.LogicContext
@@ -42,10 +40,7 @@ type BaseOutSession struct {
 	videoRtpChannel  int
 	videoRtcpChannel int
 
-	stat         base.StatSession
-	currConnStat connection.StatAtomic
-	prevConnStat connection.Stat
-	staleStat    *connection.Stat
+	sessionStat base.BasicSessionStat
 
 	// only for debug log
 	debugLogMaxCount         int
@@ -58,21 +53,16 @@ type BaseOutSession struct {
 	waitChan    chan error
 }
 
-func NewBaseOutSession(uniqueKey string, cmdSession IInterleavedPacketWriter) *BaseOutSession {
+func NewBaseOutSession(sessionType base.SessionType, cmdSession IInterleavedPacketWriter) *BaseOutSession {
 	s := &BaseOutSession{
-		uniqueKey:  uniqueKey,
-		cmdSession: cmdSession,
-		stat: base.StatSession{
-			Protocol:  base.ProtocolRtsp,
-			SessionId: uniqueKey,
-			StartTime: base.ReadableNowTime(),
-		},
+		cmdSession:       cmdSession,
+		sessionStat:      base.NewBasicSessionStat(sessionType, ""),
 		audioRtpChannel:  -1,
 		videoRtpChannel:  -1,
 		debugLogMaxCount: 3,
 		waitChan:         make(chan error, 1),
 	}
-	Log.Infof("[%s] lifecycle new rtsp BaseOutSession. session=%p", uniqueKey, s)
+	Log.Infof("[%s] lifecycle new rtsp BaseOutSession. session=%p", s.UniqueKey(), s)
 	return s
 }
 
@@ -136,13 +126,13 @@ func (session *BaseOutSession) HandleInterleavedPacket(b []byte, channel int) {
 	case session.audioRtpChannel:
 		fallthrough
 	case session.videoRtpChannel:
-		Log.Warnf("[%s] not supposed to read packet in rtp channel of BaseOutSession. channel=%d, len=%d", session.uniqueKey, channel, len(b))
+		Log.Warnf("[%s] not supposed to read packet in rtp channel of BaseOutSession. channel=%d, len=%d", session.UniqueKey(), channel, len(b))
 	case session.audioRtcpChannel:
 		fallthrough
 	case session.videoRtcpChannel:
-		Log.Debugf("[%s] read interleaved rtcp packet. b=%s", session.uniqueKey, hex.Dump(nazabytes.Prefix(b, 32)))
+		Log.Debugf("[%s] read interleaved rtcp packet. b=%s", session.UniqueKey(), hex.Dump(nazabytes.Prefix(b, 32)))
 	default:
-		Log.Errorf("[%s] read interleaved packet but channel invalid. channel=%d", session.uniqueKey, channel)
+		Log.Errorf("[%s] read interleaved packet but channel invalid. channel=%d", session.UniqueKey(), channel)
 	}
 }
 
@@ -153,7 +143,7 @@ func (session *BaseOutSession) WriteRtpPacket(packet rtprtcp.RtpPacket) error {
 	t := int(packet.Header.PacketType)
 	if session.sdpCtx.IsAudioPayloadTypeOrigin(t) {
 		if session.loggedWriteAudioRtpCount < session.debugLogMaxCount {
-			Log.Debugf("[%s] LOGPACKET. write audio rtp=%+v", session.uniqueKey, packet.Header)
+			Log.Debugf("[%s] LOGPACKET. write audio rtp=%+v", session.UniqueKey(), packet.Header)
 			session.loggedWriteAudioRtpCount++
 		}
 
@@ -165,7 +155,7 @@ func (session *BaseOutSession) WriteRtpPacket(packet rtprtcp.RtpPacket) error {
 		}
 	} else if session.sdpCtx.IsVideoPayloadTypeOrigin(t) {
 		if session.loggedWriteVideoRtpCount < session.debugLogMaxCount {
-			Log.Debugf("[%s] LOGPACKET. write video rtp=%+v", session.uniqueKey, packet.Header)
+			Log.Debugf("[%s] LOGPACKET. write video rtp=%+v", session.UniqueKey(), packet.Header)
 			session.loggedWriteVideoRtpCount++
 		}
 
@@ -176,58 +166,41 @@ func (session *BaseOutSession) WriteRtpPacket(packet rtprtcp.RtpPacket) error {
 			err = session.cmdSession.WriteInterleavedPacket(packet.Raw, session.videoRtpChannel)
 		}
 	} else {
-		Log.Errorf("[%s] write rtp packet but type invalid. type=%d", session.uniqueKey, t)
+		Log.Errorf("[%s] write rtp packet but type invalid. type=%d", session.UniqueKey(), t)
 		err = nazaerrors.Wrap(base.ErrRtsp)
 	}
 
 	if err == nil {
-		session.currConnStat.WroteBytesSum.Add(uint64(len(packet.Raw)))
+		session.sessionStat.AddWriteBytes(len(packet.Raw))
 	}
 	return err
 }
 
+// ----- ISessionStat --------------------------------------------------------------------------------------------------
+
 func (session *BaseOutSession) GetStat() base.StatSession {
-	session.stat.ReadBytesSum = session.currConnStat.ReadBytesSum.Load()
-	session.stat.WroteBytesSum = session.currConnStat.WroteBytesSum.Load()
-	return session.stat
+	return session.sessionStat.GetStat()
 }
 
 func (session *BaseOutSession) UpdateStat(intervalSec uint32) {
-	readBytesSum := session.currConnStat.ReadBytesSum.Load()
-	wroteBytesSum := session.currConnStat.WroteBytesSum.Load()
-	rDiff := readBytesSum - session.prevConnStat.ReadBytesSum
-	session.stat.ReadBitrate = int(rDiff * 8 / 1024 / uint64(intervalSec))
-	wDiff := wroteBytesSum - session.prevConnStat.WroteBytesSum
-	session.stat.WriteBitrate = int(wDiff * 8 / 1024 / uint64(intervalSec))
-	session.stat.Bitrate = session.stat.WriteBitrate
-	session.prevConnStat.ReadBytesSum = readBytesSum
-	session.prevConnStat.WroteBytesSum = wroteBytesSum
+	session.sessionStat.UpdateStat(intervalSec)
 }
 
 func (session *BaseOutSession) IsAlive() (readAlive, writeAlive bool) {
-	readBytesSum := session.currConnStat.ReadBytesSum.Load()
-	wroteBytesSum := session.currConnStat.WroteBytesSum.Load()
-	if session.staleStat == nil {
-		session.staleStat = new(connection.Stat)
-		session.staleStat.ReadBytesSum = readBytesSum
-		session.staleStat.WroteBytesSum = wroteBytesSum
-		return true, true
-	}
-
-	readAlive = !(readBytesSum-session.staleStat.ReadBytesSum == 0)
-	writeAlive = !(wroteBytesSum-session.staleStat.WroteBytesSum == 0)
-	session.staleStat.ReadBytesSum = readBytesSum
-	session.staleStat.WroteBytesSum = wroteBytesSum
-	return
+	return session.sessionStat.IsAlive()
 }
 
+// ---------------------------------------------------------------------------------------------------------------------
+
 func (session *BaseOutSession) UniqueKey() string {
-	return session.uniqueKey
+	return session.sessionStat.UniqueKey()
 }
 
 func (session *BaseOutSession) onReadRtpPacket(b []byte, rAddr *net.UDPAddr, err error) bool {
+	// TODO(chef): [fix] 在收到rtp和rtcp的地方，加入stat统计 202205
+
 	if session.loggedReadRtpCount.Load() < int32(session.debugLogMaxCount) {
-		Log.Debugf("[%s] LOGPACKET. read rtp=%s", session.uniqueKey, hex.Dump(nazabytes.Prefix(b, 32)))
+		Log.Debugf("[%s] LOGPACKET. read rtp=%s", session.UniqueKey(), hex.Dump(nazabytes.Prefix(b, 32)))
 		session.loggedReadRtpCount.Increment()
 	}
 	return true
@@ -237,7 +210,7 @@ func (session *BaseOutSession) onReadRtcpPacket(b []byte, rAddr *net.UDPAddr, er
 	// TODO chef: impl me
 
 	if session.loggedReadRtcpCount.Load() < int32(session.debugLogMaxCount) {
-		Log.Debugf("[%s] LOGPACKET. read rtcp=%s", session.uniqueKey, hex.Dump(nazabytes.Prefix(b, 32)))
+		Log.Debugf("[%s] LOGPACKET. read rtcp=%s", session.UniqueKey(), hex.Dump(nazabytes.Prefix(b, 32)))
 		session.loggedReadRtcpCount.Increment()
 	}
 	return true
@@ -246,7 +219,7 @@ func (session *BaseOutSession) onReadRtcpPacket(b []byte, rAddr *net.UDPAddr, er
 func (session *BaseOutSession) dispose(err error) error {
 	var retErr error
 	session.disposeOnce.Do(func() {
-		Log.Infof("[%s] lifecycle dispose rtsp BaseOutSession. session=%p", session.uniqueKey, session)
+		Log.Infof("[%s] lifecycle dispose rtsp BaseOutSession. session=%p", session.UniqueKey(), session)
 		var e1, e2, e3, e4 error
 		if session.audioRtpConn != nil {
 			e1 = session.audioRtpConn.Dispose()

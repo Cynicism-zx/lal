@@ -6,19 +6,19 @@
 //
 // Author: Chef (191201771@qq.com)
 
-package gb28181_test
+package gb28181
 
 import (
-	"bytes"
 	"encoding/hex"
-	"fmt"
-	"github.com/q191201771/lal/pkg/avc"
-	"github.com/q191201771/lal/pkg/gb28181"
-	"github.com/q191201771/naza/pkg/nazabytes"
-	"github.com/q191201771/naza/pkg/nazalog"
+	"github.com/q191201771/lal/pkg/base"
+	"github.com/q191201771/naza/pkg/nazamd5"
 	"io/ioutil"
 	"os"
 	"testing"
+
+	"github.com/q191201771/lal/pkg/avc"
+	"github.com/q191201771/naza/pkg/nazabytes"
+	"github.com/q191201771/naza/pkg/nazalog"
 )
 
 var goldenRtpList = []string{
@@ -66,9 +66,7 @@ var goldenRtpList = []string{
 }
 
 func TestPsUnpacker(t *testing.T) {
-	unpacker := gb28181.NewPsUnpacker().WithCallbackFunc(nil, func(payload []byte, dts int64, pts int64) {
-
-	})
+	unpacker := NewPsUnpacker()
 
 	for i, item := range goldenRtpList {
 		nazalog.Debugf("%d", i)
@@ -76,6 +74,39 @@ func TestPsUnpacker(t *testing.T) {
 		nazalog.Debugf("%s", hex.Dump(nazabytes.Prefix(b, 128)))
 		unpacker.FeedRtpPacket(b)
 	}
+}
+
+var avcNalu = []byte{
+	0x00, 0x00, 0x00,
+	0x01, 0x64, 0x00, 0x20, 0xFF,
+	0xE1, 0x00, 0x19,
+	0x67, 0x64, 0x00, 0x20, 0xAC, 0xD9, 0x40, 0xC0, 0x29, 0xB0, 0x11, 0x00, 0x00, 0x03, 0x00, 0x01, 0x00, 0x00, 0x03, 0x00, 0x32, 0x0F, 0x18, 0x31, 0x96,
+	0x01, 0x00, 0x05,
+	0x68, 0xEB, 0xEC, 0xB2, 0x2C,
+	0x00, 0x00, 0x00, 0x00,
+	0x01, 0x09, 0x00,
+	0x00, 0x00, 0x00, 0x00,
+	0x01, 0x65, 0x01,
+	0x00, 0x00,
+	0x01, 0x41, 0x03,
+}
+var hevcNalu = []byte{
+	0x00, 0x00, 0x00, 0x01, 0x40, 0x01,
+	0x0c, 0x01, 0xff, 0xff,
+	0x01,
+	0x60, 0x00, 0x00, 0x03, 0x00,
+	0x90, 0x00, 0x00, 0x03, 0x00, 0x00, 0x03, 0x00,
+	0x3f,
+	0xba, 0x02, 0x40,
+	0x00, 0x00, 0x00, 0x01, 0x42, 0x01,
+	0x01,
+	0x01,
+	0x60, 0x00, 0x00, 0x03, 0x00,
+	0x90, 0x00, 0x00, 0x03, 0x00, 0x00, 0x03, 0x00,
+	0x3f,
+	0xa0, 0x05, 0x02, 0x01, 0x71, 0xf2, 0xe5, 0xba, 0x4a, 0x4c, 0x2f, 0x01, 0x01, 0x00, 0x00, 0x03, 0x00, 0x01, 0x00, 0x00, 0x03, 0x00, 0x0f, 0x08,
+	0x00, 0x00, 0x00, 0x01, 0x44, 0x01, 0xc0, 0x73, 0xc1, 0x89,
+	0x00, 0x00, 0x01, 0x26, 0x01, 0x83,
 }
 
 func TestPsUnpacker2(t *testing.T) {
@@ -86,6 +117,7 @@ func TestPsUnpacker2(t *testing.T) {
 }
 
 func test1() {
+	nazalog.Debugf("[test1] > test1")
 	// 读取raw文件(包连在一起，不包含rtp header)，存取h264文件
 
 	b, err := ioutil.ReadFile("/tmp/udp.raw")
@@ -93,49 +125,27 @@ func test1() {
 
 	fp, err := os.Create("/tmp/udp.h264")
 	nazalog.Assert(nil, err)
-	defer fp.Close()
 
 	waitingSps := true
-	unpacker := gb28181.NewPsUnpacker().WithCallbackFunc(nil, func(payload []byte, dts int64, pts int64) {
-		nazalog.Debugf("onVideo. length=%d", len(payload))
+	unpacker := NewPsUnpacker().WithOnAvPacket(func(packet *base.AvPacket) {
+		if !packet.IsVideo() {
+			return
+		}
+
+		nazalog.Debugf("[test1] onVideo. length=%d", len(packet.Payload))
 		if waitingSps {
-			if avc.ParseNaluType(payload[4]) == avc.NaluTypeSps {
+			if avc.ParseNaluType(packet.Payload[4]) == avc.NaluTypeSps {
 				waitingSps = false
 			} else {
 				return
 			}
 		}
-		_, _ = fp.Write(payload)
+		_, _ = fp.Write(packet.Payload)
 	})
-	unpacker.FeedRtpBody(b)
-}
+	unpacker.FeedRtpBody(b, 0)
 
-func test2() {
-	// 一个udp包一个文件，按行分隔，hex stream格式如下
-	// 8060 0000 0000 0000 0beb c567 0000 01ba
-	// 46ab 1ea9 4401 0139 9ffe ffff 0094 ab0d
-
-	fp, err := os.Create("/tmp/udp2.h264")
+	fp.Close()
+	out, err := ioutil.ReadFile("/tmp/udp.h264")
 	nazalog.Assert(nil, err)
-	defer fp.Close()
-
-	unpacker := gb28181.NewPsUnpacker().WithCallbackFunc(nil, func(payload []byte, dts int64, pts int64) {
-		nazalog.Debugf("onVideo. length=%d", len(payload))
-		_, _ = fp.Write(payload)
-	})
-
-	for i := 1; ; i++ {
-		filename := fmt.Sprintf("/tmp/rtp-ps-video/%d.ps", i)
-		b, err := ioutil.ReadFile(filename)
-		if err != nil {
-			return
-		}
-
-		// to be continued.
-		// 这样解析是错误的，如果内部二进制有0a就过滤掉了，应该转成string再做\n去除操作
-		b = bytes.Join(bytes.Split(b, []byte{'\n'}), nil)
-		b = bytes.Join(bytes.Split(b, []byte{' '}), nil)
-		nazalog.Debugf("%s", hex.Dump(b))
-		unpacker.FeedRtpPacket(b)
-	}
+	nazalog.Assert("fd8dbe365152e212bf8cbabb7a99c1aa", nazamd5.Md5(out))
 }

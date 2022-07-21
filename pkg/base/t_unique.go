@@ -11,18 +11,20 @@ package base
 import "github.com/q191201771/naza/pkg/unique"
 
 const (
-	UkPreCustomizePubSessionContext = "CUSTOMIZEPUB"
-	UkPreRtmpServerSession          = "RTMPPUBSUB"
-	UkPreRtmpPushSession            = "RTMPPUSH"
-	UkPreRtmpPullSession            = "RTMPPULL"
-	UkPreRtspServerCommandSession   = "RTSPSRVCMD"
-	UkPreRtspPubSession             = "RTSPPUB"
-	UkPreRtspSubSession             = "RTSPSUB"
-	UkPreRtspPushSession            = "RTSPPUSH"
-	UkPreRtspPullSession            = "RTSPPULL"
-	UkPreFlvSubSession              = "FLVSUB"
-	UkPreTsSubSession               = "TSSUB"
-	UkPreFlvPullSession             = "FLVPULL"
+	UkPreCustomizePubSessionContext = SessionProtocolCustomizeStr + SessionBaseTypePubStr // "CUSTOMIZEPUB"
+	UkPreRtmpServerSession          = SessionProtocolRtmpStr + SessionBaseTypePubSubStr   // "RTMPPUBSUB" // 两种可能，pub或者sub
+	UkPreRtmpPushSession            = SessionProtocolRtmpStr + SessionBaseTypePushStr     // "RTMPPUSH"
+	UkPreRtmpPullSession            = SessionProtocolRtmpStr + SessionBaseTypePullStr     // "RTMPPULL"
+	UkPreRtspPubSession             = SessionProtocolRtspStr + SessionBaseTypePubStr      // "RTSPPUB"
+	UkPreRtspSubSession             = SessionProtocolRtspStr + SessionBaseTypePubSubStr   // "RTSPSUB"
+	UkPreRtspPushSession            = SessionProtocolRtspStr + SessionBaseTypePushStr     // "RTSPPUSH"
+	UkPreRtspPullSession            = SessionProtocolRtspStr + SessionBaseTypePullStr     // "RTSPPULL"
+	UkPreFlvSubSession              = SessionProtocolFlvStr + SessionBaseTypePubSubStr    // "FLVSUB"
+	UkPreFlvPullSession             = SessionProtocolFlvStr + SessionBaseTypePullStr      // "FLVPULL"
+	UkPreTsSubSession               = SessionProtocolTsStr + SessionBaseTypePubSubStr     // "TSSUB"
+	UkPrePsPubSession               = SessionProtocolPsStr + SessionBaseTypePubStr        // "PSPUB"
+
+	UkPreRtspServerCommandSession = "RTSPSRVCMD" // 这个不暴露给上层
 
 	UkPreGroup              = "GROUP"
 	UkPreHlsMuxer           = "HLSMUXER"
@@ -81,6 +83,10 @@ func GenUkFlvPullSession() string {
 	return siUkFlvPullSession.GenUniqueKey()
 }
 
+func GenUkPsPubSession() string {
+	return siUkPsPubSession.GenUniqueKey()
+}
+
 func GenUkGroup() string {
 	return siUkGroup.GenUniqueKey()
 }
@@ -106,6 +112,7 @@ var (
 	siUkFlvSubSession            *unique.SingleGenerator
 	siUkTsSubSession             *unique.SingleGenerator
 	siUkFlvPullSession           *unique.SingleGenerator
+	siUkPsPubSession             *unique.SingleGenerator
 
 	siUkGroup              *unique.SingleGenerator
 	siUkHlsMuxer           *unique.SingleGenerator
@@ -125,6 +132,7 @@ func init() {
 	siUkFlvSubSession = unique.NewSingleGenerator(UkPreFlvSubSession)
 	siUkTsSubSession = unique.NewSingleGenerator(UkPreTsSubSession)
 	siUkFlvPullSession = unique.NewSingleGenerator(UkPreFlvPullSession)
+	siUkPsPubSession = unique.NewSingleGenerator(UkPrePsPubSession)
 
 	siUkGroup = unique.NewSingleGenerator(UkPreGroup)
 	siUkHlsMuxer = unique.NewSingleGenerator(UkPreHlsMuxer)

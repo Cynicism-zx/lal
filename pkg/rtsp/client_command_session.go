@@ -229,7 +229,7 @@ func (session *ClientCommandSession) doContext(ctx context.Context, rawUrl strin
 
 	select {
 	case <-ctx.Done():
-		_ = session.dispose(nil)
+		_ = session.dispose(ctx.Err())
 		return ctx.Err()
 	case err := <-errChan:
 		if err != nil {
@@ -565,7 +565,6 @@ func (session *ClientCommandSession) writeCmdReadResp(method, uri string, header
 		session.auth.FeedWwwAuthenticate(ctx.Headers.Values(HeaderWwwAuthenticate), session.urlCtx.Username, session.urlCtx.Password)
 	}
 
-	// TODO(chef): refactor never reach here？
 	err = nazaerrors.Wrap(base.ErrRtsp)
 	return
 }

@@ -38,13 +38,10 @@ var defaultPullSessionOption = PullSessionOption{
 }
 
 type PullSession struct {
-	uniqueKey string            // const after ctor
-	option    PullSessionOption // const after ctor
+	option PullSessionOption // const after ctor
 
-	conn         connection.Connection
-	prevConnStat connection.Stat
-	staleStat    *connection.Stat
-	stat         base.StatSession
+	conn        connection.Connection
+	sessionStat base.BasicSessionStat
 
 	urlCtx base.UrlContext
 
@@ -59,12 +56,11 @@ func NewPullSession(modOptions ...ModPullSessionOption) *PullSession {
 		fn(&option)
 	}
 
-	uk := base.GenUkFlvPullSession()
 	s := &PullSession{
-		uniqueKey: uk,
-		option:    option,
+		option:      option,
+		sessionStat: base.NewBasicSessionStat(base.SessionTypeFlvPull, ""),
 	}
-	Log.Infof("[%s] lifecycle new httpflv PullSession. session=%p", uk, s)
+	Log.Infof("[%s] lifecycle new httpflv PullSession. session=%p", s.UniqueKey(), s)
 	return s
 }
 
@@ -82,7 +78,7 @@ type OnReadFlvTag func(tag Tag)
 // @param onReadFlvTag 读取到 flv tag 数据时回调。回调结束后，PullSession 不会再使用这块 <tag> 数据。
 //
 func (session *PullSession) Pull(rawUrl string, onReadFlvTag OnReadFlvTag) error {
-	Log.Debugf("[%s] pull. url=%s", session.uniqueKey, rawUrl)
+	Log.Debugf("[%s] pull. url=%s", session.UniqueKey(), rawUrl)
 
 	var (
 		ctx    context.Context
@@ -137,42 +133,27 @@ func (session *PullSession) RawQuery() string {
 
 // UniqueKey 文档请参考： interface IObject
 func (session *PullSession) UniqueKey() string {
-	return session.uniqueKey
+	return session.sessionStat.UniqueKey()
 }
+
+// ----- ISessionStat --------------------------------------------------------------------------------------------------
 
 // UpdateStat 文档请参考： interface ISessionStat
 func (session *PullSession) UpdateStat(intervalSec uint32) {
-	currStat := session.conn.GetStat()
-	rDiff := currStat.ReadBytesSum - session.prevConnStat.ReadBytesSum
-	session.stat.ReadBitrate = int(rDiff * 8 / 1024 / uint64(intervalSec))
-	wDiff := currStat.WroteBytesSum - session.prevConnStat.WroteBytesSum
-	session.stat.WriteBitrate = int(wDiff * 8 / 1024 / uint64(intervalSec))
-	session.stat.Bitrate = session.stat.ReadBitrate
-	session.prevConnStat = currStat
+	session.sessionStat.UpdateStatWitchConn(session.conn, intervalSec)
 }
 
 // GetStat 文档请参考： interface ISessionStat
 func (session *PullSession) GetStat() base.StatSession {
-	connStat := session.conn.GetStat()
-	session.stat.ReadBytesSum = connStat.ReadBytesSum
-	session.stat.WroteBytesSum = connStat.WroteBytesSum
-	return session.stat
+	return session.sessionStat.GetStatWithConn(session.conn)
 }
 
 // IsAlive 文档请参考： interface ISessionStat
 func (session *PullSession) IsAlive() (readAlive, writeAlive bool) {
-	currStat := session.conn.GetStat()
-	if session.staleStat == nil {
-		session.staleStat = new(connection.Stat)
-		*session.staleStat = currStat
-		return true, true
-	}
-
-	readAlive = !(currStat.ReadBytesSum-session.staleStat.ReadBytesSum == 0)
-	writeAlive = !(currStat.WroteBytesSum-session.staleStat.WroteBytesSum == 0)
-	*session.staleStat = currStat
-	return
+	return session.sessionStat.IsAliveWitchConn(session.conn)
 }
+
+// ---------------------------------------------------------------------------------------------------------------------
 
 func (session *PullSession) pullContext(ctx context.Context, rawUrl string, onReadFlvTag OnReadFlvTag) error {
 	errChan := make(chan error, 1)
@@ -200,13 +181,13 @@ func (session *PullSession) pullContext(ctx context.Context, rawUrl string, onRe
 			if statusCode == "301" || statusCode == "302" {
 				url = headers.Get("Location")
 				if url == "" {
-					Log.Warnf("[%s] redirect but Location not found. headers=%+v", session.uniqueKey, headers)
+					Log.Warnf("[%s] redirect but Location not found. headers=%+v", session.UniqueKey(), headers)
 					errChan <- nil
 					return
 				}
 
 				_ = session.conn.Close()
-				Log.Debugf("[%s] redirect to %s", session.uniqueKey, url)
+				Log.Debugf("[%s] redirect to %s", session.UniqueKey(), url)
 				continue
 			}
 
@@ -242,7 +223,9 @@ func (session *PullSession) connect(rawUrl string) (err error) {
 		return
 	}
 
-	Log.Debugf("[%s] > tcp connect. %s", session.uniqueKey, session.urlCtx.HostWithPort)
+	session.sessionStat.SetRemoteAddr(session.urlCtx.HostWithPort)
+
+	Log.Debugf("[%s] > tcp connect. %s", session.UniqueKey(), session.urlCtx.HostWithPort)
 
 	var conn net.Conn
 	if session.urlCtx.Scheme == "https" {
@@ -258,7 +241,7 @@ func (session *PullSession) connect(rawUrl string) (err error) {
 		return err
 	}
 
-	Log.Debugf("[%s] tcp connect succ. remote=%s", session.uniqueKey, conn.RemoteAddr().String())
+	Log.Debugf("[%s] tcp connect succ. remote=%s", session.UniqueKey(), conn.RemoteAddr().String())
 
 	session.conn = connection.New(conn, func(option *connection.Option) {
 		option.ReadBufSize = readBufSize
@@ -270,7 +253,7 @@ func (session *PullSession) connect(rawUrl string) (err error) {
 
 func (session *PullSession) writeHttpRequest() error {
 	// # 发送 http GET 请求
-	Log.Debugf("[%s] > W http request. GET %s", session.uniqueKey, session.urlCtx.PathWithRawQuery)
+	Log.Debugf("[%s] > W http request. GET %s", session.UniqueKey(), session.urlCtx.PathWithRawQuery)
 	req := fmt.Sprintf("GET %s HTTP/1.0\r\nUser-Agent: %s\r\nAccept: */*\r\nRange: byte=0-\r\nConnection: close\r\nHost: %s\r\nIcy-MetaData: 1\r\n\r\n",
 		session.urlCtx.PathWithRawQuery, base.LalHttpflvPullSessionUa, session.urlCtx.StdHost)
 	_, err := session.conn.Write([]byte(req))
@@ -287,7 +270,7 @@ func (session *PullSession) readHttpRespHeader() (statusCode string, headers htt
 		return
 	}
 
-	Log.Debugf("[%s] < R http response header. statusLine=%s", session.uniqueKey, statusLine)
+	Log.Debugf("[%s] < R http response header. statusLine=%s", session.UniqueKey(), statusLine)
 	return
 }
 
@@ -297,14 +280,14 @@ func (session *PullSession) readFlvHeader() ([]byte, error) {
 	if err != nil {
 		return flvHeader, err
 	}
-	Log.Debugf("[%s] < R http flv header.", session.uniqueKey)
+	Log.Debugf("[%s] < R http flv header.", session.UniqueKey())
 
 	// TODO chef: check flv header's value
 	return flvHeader, nil
 }
 
 func (session *PullSession) readTag() (Tag, error) {
-	return readTag(session.conn)
+	return ReadTag(session.conn)
 }
 
 func (session *PullSession) runReadLoop(onReadFlvTag OnReadFlvTag) {
@@ -330,7 +313,7 @@ func (session *PullSession) runReadLoop(onReadFlvTag OnReadFlvTag) {
 func (session *PullSession) dispose(err error) error {
 	var retErr error
 	session.disposeOnce.Do(func() {
-		Log.Infof("[%s] lifecycle dispose httpflv PullSession. err=%+v", session.uniqueKey, err)
+		Log.Infof("[%s] lifecycle dispose httpflv PullSession. err=%+v", session.UniqueKey(), err)
 		if session.conn == nil {
 			retErr = base.ErrSessionNotStarted
 			return

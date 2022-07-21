@@ -17,11 +17,10 @@ import (
 
 	"github.com/q191201771/lal/pkg/base"
 	"github.com/q191201771/lal/pkg/hls"
+	"github.com/q191201771/lal/pkg/rtsp"
 	"github.com/q191201771/naza/pkg/nazajson"
 	"github.com/q191201771/naza/pkg/nazalog"
 )
-
-const ConfVersion = "v0.2.9"
 
 const (
 	defaultHlsCleanupMode    = hls.CleanupModeInTheEnd
@@ -31,16 +30,16 @@ const (
 )
 
 type Config struct {
-	ConfVersion       string            `json:"conf_version"`
-	RtmpConfig        RtmpConfig        `json:"rtmp"`
-	DefaultHttpConfig DefaultHttpConfig `json:"default_http"`
-	HttpflvConfig     HttpflvConfig     `json:"httpflv"`
-	HlsConfig         HlsConfig         `json:"hls"`
-	HttptsConfig      HttptsConfig      `json:"httpts"`
-	RtspConfig        RtspConfig        `json:"rtsp"`
-	RecordConfig      RecordConfig      `json:"record"`
-	RelayPushConfig   RelayPushConfig   `json:"relay_push"`
-	RelayPullConfig   RelayPullConfig   `json:"relay_pull"`
+	ConfVersion           string                `json:"conf_version"`
+	RtmpConfig            RtmpConfig            `json:"rtmp"`
+	DefaultHttpConfig     DefaultHttpConfig     `json:"default_http"`
+	HttpflvConfig         HttpflvConfig         `json:"httpflv"`
+	HlsConfig             HlsConfig             `json:"hls"`
+	HttptsConfig          HttptsConfig          `json:"httpts"`
+	RtspConfig            RtspConfig            `json:"rtsp"`
+	RecordConfig          RecordConfig          `json:"record"`
+	RelayPushConfig       RelayPushConfig       `json:"relay_push"`
+	StaticRelayPullConfig StaticRelayPullConfig `json:"static_relay_pull"`
 
 	HttpApiConfig    HttpApiConfig    `json:"http_api"`
 	ServerId         string           `json:"server_id"`
@@ -87,6 +86,7 @@ type RtspConfig struct {
 	Enable              bool   `json:"enable"`
 	Addr                string `json:"addr"`
 	OutWaitKeyFrameFlag bool   `json:"out_wait_key_frame_flag"`
+	rtsp.ServerAuthConfig
 }
 
 type RecordConfig struct {
@@ -101,7 +101,7 @@ type RelayPushConfig struct {
 	AddrList []string `json:"addr_list"`
 }
 
-type RelayPullConfig struct {
+type StaticRelayPullConfig struct {
 	Enable bool   `json:"enable"`
 	Addr   string `json:"addr"`
 }
@@ -120,7 +120,10 @@ type HttpNotifyConfig struct {
 	OnPubStop         string `json:"on_pub_stop"`
 	OnSubStart        string `json:"on_sub_start"`
 	OnSubStop         string `json:"on_sub_stop"`
+	OnRelayPullStart  string `json:"on_relay_pull_start"`
+	OnRelayPullStop   string `json:"on_relay_pull_stop"`
 	OnRtmpConnect     string `json:"on_rtmp_connect"`
+	OnHlsMakeTs       string `json:"on_hls_make_ts"`
 }
 
 type SimpleAuthConfig struct {
@@ -242,9 +245,9 @@ func LoadConfAndInitLog(confFile string) *Config {
 `)
 
 	// 检查配置版本号是否匹配
-	if config.ConfVersion != ConfVersion {
+	if config.ConfVersion != base.ConfVersion {
 		Log.Warnf("config version invalid. conf version of lalserver=%s, conf version of config file=%s",
-			ConfVersion, config.ConfVersion)
+			base.ConfVersion, config.ConfVersion)
 	}
 
 	// 做个全量字段检查，缺失的字段，Go中会先设置为零值

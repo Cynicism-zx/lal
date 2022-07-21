@@ -9,16 +9,14 @@
 package rtsp
 
 import (
+	"github.com/q191201771/lal/pkg/base"
 	"github.com/q191201771/lal/pkg/rtprtcp"
 	"github.com/q191201771/lal/pkg/sdp"
 	"github.com/q191201771/naza/pkg/nazaerrors"
-
-	"github.com/q191201771/lal/pkg/base"
 	"github.com/q191201771/naza/pkg/nazanet"
 )
 
 type SubSession struct {
-	uniqueKey      string // const after ctor
 	urlCtx         base.UrlContext
 	cmdSession     *ServerCommandSession
 	baseOutSession *BaseOutSession
@@ -27,20 +25,26 @@ type SubSession struct {
 }
 
 func NewSubSession(urlCtx base.UrlContext, cmdSession *ServerCommandSession) *SubSession {
-	uk := base.GenUkRtspSubSession()
 	s := &SubSession{
-		uniqueKey:  uk,
 		urlCtx:     urlCtx,
 		cmdSession: cmdSession,
 
 		ShouldWaitVideoKeyFrame: true,
 	}
-	baseOutSession := NewBaseOutSession(uk, s)
+	baseOutSession := NewBaseOutSession(base.SessionTypeRtspSub, s)
 	s.baseOutSession = baseOutSession
-	Log.Infof("[%s] lifecycle new rtsp SubSession. session=%p, streamName=%s", uk, s, urlCtx.LastItemOfPath)
+	Log.Infof("[%s] lifecycle new rtsp SubSession. session=%p, streamName=%s", s.UniqueKey(), s, urlCtx.LastItemOfPath)
 	return s
 }
 
+// FeedSdp 供上层调用
+//
+func (session *SubSession) FeedSdp(sdpCtx sdp.LogicContext) {
+	session.cmdSession.FeedSdp(sdpCtx.RawSdp)
+}
+
+// InitWithSdp 供 ServerCommandSession 调用
+//
 func (session *SubSession) InitWithSdp(sdpCtx sdp.LogicContext) {
 	session.baseOutSession.InitWithSdp(sdpCtx)
 }
@@ -58,7 +62,7 @@ func (session *SubSession) WriteRtpPacket(packet rtprtcp.RtpPacket) {
 }
 
 func (session *SubSession) Dispose() error {
-	Log.Infof("[%s] lifecycle dispose rtsp SubSession. session=%p", session.uniqueKey, session)
+	Log.Infof("[%s] lifecycle dispose rtsp SubSession. session=%p", session.UniqueKey(), session)
 	e1 := session.baseOutSession.Dispose()
 	e2 := session.cmdSession.Dispose()
 	return nazaerrors.CombineErrors(e1, e2)
@@ -85,7 +89,7 @@ func (session *SubSession) RawQuery() string {
 }
 
 func (session *SubSession) UniqueKey() string {
-	return session.uniqueKey
+	return session.baseOutSession.UniqueKey()
 }
 
 func (session *SubSession) GetStat() base.StatSession {

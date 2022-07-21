@@ -37,18 +37,18 @@ func NewSimpleAuthCtx(config SimpleAuthConfig) *SimpleAuthCtx {
 }
 
 func (s *SimpleAuthCtx) OnPubStart(info base.PubStartInfo) error {
-	if s.config.PubRtmpEnable && info.Protocol == base.ProtocolRtmp ||
-		s.config.PubRtspEnable && info.Protocol == base.ProtocolRtsp {
+	if s.config.PubRtmpEnable && info.Protocol == base.SessionProtocolRtmpStr ||
+		s.config.PubRtspEnable && info.Protocol == base.SessionProtocolRtspStr {
 		return s.check(info.StreamName, info.UrlParam)
 	}
 	return nil
 }
 
 func (s *SimpleAuthCtx) OnSubStart(info base.SubStartInfo) error {
-	if (s.config.SubRtmpEnable && info.Protocol == base.ProtocolRtmp) ||
-		(s.config.SubHttpflvEnable && info.Protocol == base.ProtocolHttpflv) ||
-		(s.config.SubHttptsEnable && info.Protocol == base.ProtocolHttpts) ||
-		(s.config.SubRtspEnable && info.Protocol == base.ProtocolRtsp) {
+	if (s.config.SubRtmpEnable && info.Protocol == base.SessionProtocolRtmpStr) ||
+		(s.config.SubHttpflvEnable && info.Protocol == base.SessionProtocolFlvStr) ||
+		(s.config.SubHttptsEnable && info.Protocol == base.SessionProtocolTsStr) ||
+		(s.config.SubRtspEnable && info.Protocol == base.SessionProtocolRtspStr) {
 		return s.check(info.StreamName, info.UrlParam)
 	}
 	return nil
@@ -82,5 +82,7 @@ func (s *SimpleAuthCtx) check(streamName string, urlParam string) error {
 		return nil
 	}
 
+	Log.Warnf("[%p] SimpleAuthCtx::check failed, se=%s, key=%s, streamName=%s, v=%s, urlParam=%s",
+		s, se, s.config.Key, streamName, v, urlParam)
 	return base.ErrSimpleAuthFailed
 }

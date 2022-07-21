@@ -44,7 +44,7 @@ func NewPushSession(modOptions ...ModPushSessionOption) *PushSession {
 	}
 	return &PushSession{
 		IsFresh: true,
-		core: NewClientSession(CstPushSession, func(option *ClientSessionOption) {
+		core: NewClientSession(base.SessionTypeRtmpPush, func(option *ClientSessionOption) {
 			option.DoTimeoutMs = opt.PushTimeoutMs
 			option.WriteAvTimeoutMs = opt.WriteAvTimeoutMs
 			option.WriteBufSize = opt.WriteBufSize
@@ -60,9 +60,13 @@ func (s *PushSession) Push(rawUrl string) error {
 	return s.core.Do(rawUrl)
 }
 
-// 发送数据
-// 注意，业务方需将数据打包成rtmp chunk格式后，再调用该函数发送
+// Write 发送数据
+//
+// @param msg: 注意，`msg`数据应该是已经打包成rtmp chunk格式的数据。这里的数据就对应socket发送的数据，内部不会再修改数据内容。
+//
 func (s *PushSession) Write(msg []byte) error {
+	// TODO(chef): [opt] 使用Write函数时确保metadata有@SetDataFrame 202207
+
 	return s.core.Write(msg)
 }
 
@@ -112,8 +116,10 @@ func (s *PushSession) RawQuery() string {
 
 // UniqueKey 文档请参考： interface IObject
 func (s *PushSession) UniqueKey() string {
-	return s.core.uniqueKey
+	return s.core.UniqueKey()
 }
+
+// ----- ISessionStat --------------------------------------------------------------------------------------------------
 
 // GetStat 文档请参考： interface ISessionStat
 func (s *PushSession) GetStat() base.StatSession {

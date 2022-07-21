@@ -17,11 +17,25 @@ import (
 	"github.com/q191201771/lal/pkg/remux"
 	"github.com/q191201771/lal/pkg/rtmp"
 	"github.com/q191201771/lal/pkg/rtsp"
+	"github.com/q191201771/naza/pkg/connection"
 )
 
-// TODO(chef):
-// 规范检查
-// 1. 所有interface以I开头
+// TODO(chef): 检查所有 interface是否以I开头 202207
+// TODO(chef): 增加 gb28181.PubSession 202207
+
+var (
+	_ base.ISession = &rtmp.ServerSession{}
+	_ base.ISession = &rtsp.PubSession{}
+	_ base.ISession = &rtsp.SubSession{}
+	_ base.ISession = &httpflv.SubSession{}
+	_ base.ISession = &httpts.SubSession{}
+
+	_ base.ISession = &rtmp.PushSession{}
+	_ base.ISession = &rtmp.PullSession{}
+	_ base.ISession = &rtsp.PushSession{}
+	_ base.ISession = &rtsp.PullSession{}
+	_ base.ISession = &httpflv.PullSession{}
+)
 
 // IClientSession: 所有Client Session都满足
 var (
@@ -65,7 +79,7 @@ var (
 	_ base.IServerSessionLifecycle = &httpts.SubSession{}
 
 	// other
-	_ base.IServerSessionLifecycle = &base.HttpSubSession{}
+	_ base.IServerSessionLifecycle = &base.BasicHttpSubSession{}
 	_ base.IServerSessionLifecycle = &rtsp.ServerCommandSession{}
 )
 
@@ -84,7 +98,7 @@ var (
 	_ base.ISessionStat = &httpflv.SubSession{}
 	_ base.ISessionStat = &httpts.SubSession{}
 	// other
-	_ base.ISessionStat = &base.HttpSubSession{}
+	_ base.ISessionStat = &base.BasicHttpSubSession{}
 	_ base.ISessionStat = &rtmp.ClientSession{}
 	_ base.ISessionStat = &rtsp.BaseInSession{}
 	_ base.ISessionStat = &rtsp.BaseOutSession{}
@@ -106,7 +120,7 @@ var (
 	_ base.ISessionUrlContext = &httpflv.SubSession{}
 	_ base.ISessionUrlContext = &httpts.SubSession{}
 	// other
-	_ base.ISessionUrlContext = &base.HttpSubSession{}
+	_ base.ISessionUrlContext = &base.BasicHttpSubSession{}
 	_ base.ISessionUrlContext = &rtmp.ClientSession{}
 	_ base.ISessionUrlContext = &rtsp.ClientCommandSession{}
 )
@@ -126,7 +140,7 @@ var (
 	_ base.IObject = &httpflv.SubSession{}
 	_ base.IObject = &httpts.SubSession{}
 	//// other
-	_ base.IObject = &base.HttpSubSession{}
+	_ base.IObject = &base.BasicHttpSubSession{}
 	_ base.IObject = &rtmp.ClientSession{}
 	_ base.IObject = &rtsp.BaseInSession{}
 	_ base.IObject = &rtsp.BaseOutSession{}
@@ -175,3 +189,5 @@ var _ rtsp.IInterleavedPacketWriter = &rtsp.PubSession{}
 var _ rtsp.IInterleavedPacketWriter = &rtsp.SubSession{}
 var _ rtsp.IInterleavedPacketWriter = &rtsp.ClientCommandSession{}
 var _ rtsp.IInterleavedPacketWriter = &rtsp.ServerCommandSession{}
+
+var _ base.IStatable = connection.New(nil)
