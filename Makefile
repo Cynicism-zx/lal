@@ -1,3 +1,4 @@
+conf ?= $(shell pwd)/conf/lalserver.conf.json
 .PHONY: build
 build: deps
 	./build.sh
@@ -26,3 +27,14 @@ clean:
 
 .PHONY: all
 all: build test
+
+.PHONY: up
+up:
+	cd app/lalserver && go run main.go -c $(conf)
+.PHONY: push
+push:
+	ffmpeg -re -i demo.flv -c:a copy -c:v copy -f flv rtmp://127.0.0.1:1935/live/demo
+.PHONY: pull
+pull:
+	ffplay rtmp://127.0.0.1/live/demo
+

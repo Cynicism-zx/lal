@@ -33,7 +33,7 @@ func main() {
 
 func parseFlag() string {
 	binInfoFlag := flag.Bool("v", false, "show bin info")
-	cf := flag.String("c", "", "specify conf file")
+	cf := flag.String("c", "conf/lalserver.conf.json", "specify conf file")
 	p := flag.String("p", "", "specify current work directory")
 	flag.Parse()
 
