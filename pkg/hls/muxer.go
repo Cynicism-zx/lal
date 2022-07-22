@@ -224,7 +224,7 @@ func (m *Muxer) updateFragment(ts uint64, boundary bool) error {
 				return err
 			}
 		}
-
+		// FIXME: 解决ts分片时长不一致的问题
 		// 更新当前分片的时间长度
 		//
 		// TODO chef:

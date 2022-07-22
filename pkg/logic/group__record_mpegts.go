@@ -17,13 +17,13 @@ import (
 
 // startRecordMpegtsIfNeeded 必要时开启ts录制
 //
-func (group *Group) startRecordMpegtsIfNeeded(nowUnix int64) {
+func (group *Group) startRecordMpegtsIfNeeded(nowUnix string) {
 	if !group.config.RecordConfig.EnableMpegts {
 		return
 	}
 
 	// 构造文件名
-	filename := fmt.Sprintf("%s-%d.ts", group.streamName, nowUnix)
+	filename := fmt.Sprintf("%s-%s.ts", group.streamName, nowUnix)
 	filenameWithPath := filepath.Join(group.config.RecordConfig.MpegtsOutPath, filename)
 
 	group.recordMpegts = &mpegts.FileWriter{}

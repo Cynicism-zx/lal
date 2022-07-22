@@ -194,7 +194,7 @@ func LoadConfAndInitLog(confFile string) *Config {
 		config.LogConfig.Level = nazalog.LevelDebug
 		cacheLog = append(cacheLog, fmt.Sprintf("log.level=%s", config.LogConfig.Level.ReadableString()))
 	}
-	if !j.Exist("log.filename") {
+	if j.Exist("log.filename") { // 定义了日志路径才将日志存进文件
 		config.LogConfig.Filename = "./logs/lalserver.log"
 		cacheLog = append(cacheLog, fmt.Sprintf("log.filename=%s", config.LogConfig.Filename))
 	}
@@ -233,7 +233,7 @@ func LoadConfAndInitLog(confFile string) *Config {
 		_, _ = fmt.Fprintf(os.Stderr, "initial log failed. err=%+v\n", err)
 		base.OsExitAndWaitPressIfWindows(1)
 	}
-	Log.Info("initial log succ.")
+	Log.Info("initial log Success")
 
 	// 打印Logo
 	Log.Info(`
