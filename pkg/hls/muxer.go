@@ -338,9 +338,11 @@ func (m *Muxer) closeFragment(isLast bool) error {
 	m.writePlaylist(isLast)
 
 	if m.config.CleanupMode == CleanupModeNever || m.config.CleanupMode == CleanupModeInTheEnd {
+		// FIXME: 删除超过规定保留时间的ts文件(更新playlist.m3u8和record.m3u8)
 		m.writeRecordPlaylist()
 	}
 	if m.config.CleanupMode == CleanupModeAsap {
+		// 获取待删除的fragment信息
 		frag := m.getDeleteFrag()
 		if frag.filename != "" {
 			filenameWithPath := PathStrategy.GetTsFileNameWithPath(m.outPath, frag.filename)

@@ -1,6 +1,7 @@
 {
   "# doc of config": "https://pengrl.com/lal/#/ConfigBrief",
   "conf_version": "v0.3.3",
+  "save_duration": 24,
   "rtmp": {
     "enable": true,
     "addr": ":1935",
@@ -25,7 +26,7 @@
     "enable": true,
     "enable_https": true,
     "url_pattern": "/hls/",
-    "out_path": "./lal_record/hls/",
+    "out_path": "/home/user1/aliyunpan/video/hls/",
     "fragment_duration_ms": 3000,
     "fragment_num": 6,
     "delete_threshold": 6,
@@ -49,9 +50,9 @@
   },
   "record": {
     "enable_flv": true,
-    "flv_out_path": "./lal_record/flv/",
+    "flv_out_path": "/home/user1/aliyunpan/video/flv/",
     "enable_mpegts": false,
-    "mpegts_out_path": "./lal_record/mpegts"
+    "mpegts_out_path": "/home/user1/aliyunpan/video/mpegts"
   },
   "relay_push": {
     "enable": false,
