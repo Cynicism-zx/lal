@@ -9,11 +9,11 @@
 package logic
 
 import (
+	"github.com/q191201771/lal/pkg/mpegts"
 	"github.com/q191201771/lal/pkg/rtmp"
 	"github.com/q191201771/naza/pkg/nazalog"
 	"net"
-
-	"github.com/q191201771/lal/pkg/mpegts"
+	"time"
 
 	"github.com/q191201771/lal/pkg/avc"
 	"github.com/q191201771/lal/pkg/base"
@@ -344,6 +344,12 @@ func (group *Group) broadcastByRtmpMsg(msg base.RtmpMsg) {
 		// 流写入打开的flv文件
 		if err := group.recordFlv.WriteRaw(lazyRtmpMsg2FlvTag.GetEnsureWithoutSdf()); err != nil {
 			Log.Errorf("[%s] record flv write error. err=%+v", group.UniqueKey, err)
+			now := time.Now().Format("20060102")
+			group.startRecordFlvIfNeeded(now, group.recordFlv.Now+1)
+			// FIXME: 可能有一部分字节串已写入上一个flv文件,需要解决
+			if err := group.recordFlv.WriteRaw(lazyRtmpMsg2FlvTag.GetEnsureWithoutSdf()); err != nil {
+				Log.Errorf("[%s] record flv write error. err=%+v", group.UniqueKey, err)
+			}
 		}
 	}
 

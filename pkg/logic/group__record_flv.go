@@ -17,17 +17,17 @@ import (
 
 // startRecordFlvIfNeeded 必要时开启flv录制
 //
-func (group *Group) startRecordFlvIfNeeded(nowUnix string) {
+func (group *Group) startRecordFlvIfNeeded(nowUnix string, now int) {
 	if !group.config.RecordConfig.EnableFlv {
 		return
 	}
 
 	// 构造文件名
-	filename := fmt.Sprintf("%s-%s.flv", group.streamName, nowUnix)
+	filename := fmt.Sprintf("%s-%s-%d.flv", group.streamName, nowUnix, now)
 	filenameWithPath := filepath.Join(group.config.RecordConfig.FlvOutPath, filename)
 
 	// 初始化录制
-	group.recordFlv = &httpflv.FlvFileWriter{}
+	group.recordFlv = &httpflv.FlvFileWriter{Now: now}
 	if err := group.recordFlv.Open(filenameWithPath); err != nil {
 		Log.Errorf("[%s] record flv open file failed. filename=%s, err=%+v",
 			group.UniqueKey, filenameWithPath, err)
