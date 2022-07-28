@@ -23,13 +23,13 @@
   },
   "hls": {
     "enable": true,
-    "adaptive_bitrate": false,
+    "adaptive_bitrate": true,
     "save_duration": 24,
     "enable_https": true,
     "url_pattern": "/hls/",
     "out_path": "./video/hls/",
     "fragment_duration_ms": 1800,
-    "fragment_num": 6,
+    "fragment_num": 3,
     "delete_threshold": 6,
     "cleanup_mode": 0,
     "use_memory_as_disk_flag": false

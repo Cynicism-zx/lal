@@ -124,7 +124,6 @@ type DefaultPathStrategy struct {
 // /hls/test110/record.m3u8               -> record.m3u8               test110    m3u8     {rootOutPath}/test110/record.m3u8
 // /hls/test110/test110-1620540712084-.ts -> test110-1620540712084-.ts test110    ts       {rootOutPath/test110/test110-1620540712084-.ts
 // /hls/test110-1620540712084-.ts         -> test110-1620540712084-.ts test110    ts       {rootOutPath/test110/test110-1620540712084-.ts
-// /hls/test110/*-playlist.m3u8           -> *-playlist.m3u8           test110    m3u8     {rootOutPath/test110/*-playlist.m3u8}
 func (dps *DefaultPathStrategy) GetRequestInfo(urlCtx base.UrlContext, rootOutPath string) (ri RequestInfo) {
 	filename := urlCtx.LastItemOfPath
 	filetype := urlCtx.GetFileType()

@@ -396,16 +396,7 @@ func (m *Muxer) closeFragment(isLast bool) error {
 }
 
 // updateM3u8Helper 更新m3u8文件帮助函数
-func (m *Muxer) updateRecordM3u8Helper(fragNow *fragmentInfo, m3u8, m3u8bak string) {
-	// 增加cleanup_mode为0或1时删除超过过期时间的ts文件
-	// 获取待删除的fragment信息
-	frag := m.getDeleteFrag()
-	if frag.filename != "" {
-		filenameWithPath := PathStrategy.GetTsFileNameWithPath(m.outPath, frag.filename)
-		if err := fslCtx.Remove(filenameWithPath); err != nil {
-			Log.Warnf("[%s] remove stale fragment file failed. filename=%s, err=%+v", m.UniqueKey, filenameWithPath, err)
-		}
-	}
+func (m *Muxer) updateRecordM3u8Helper(fragNow, fragDel *fragmentInfo, m3u8, m3u8bak string) {
 	fragLines := fmt.Sprintf("#EXTINF:%.3f,\n%s\n", fragNow.duration, fragNow.filename)
 
 	content, err := fslCtx.ReadFile(m3u8)
@@ -417,12 +408,11 @@ func (m *Muxer) updateRecordM3u8Helper(fragNow *fragmentInfo, m3u8, m3u8bak stri
 			}
 		})
 		// 删除record.m3u8中此过期文件的记录
-		if frag.filename != "" {
-			if content, err = delTsInM3u8(content, frag); err != nil {
+		if fragDel.filename != "" {
+			if content, err = delTsInM3u8(content, fragDel); err != nil {
 				Log.Errorf("delete expired ts file in record.m3u8 file err: %s", err.Error())
 			}
 		}
-		fmt.Println(string(content))
 		// m3u8文件已经存在
 		content = bytes.TrimSuffix(content, []byte("#EXT-X-ENDLIST\n"))
 		content, err = updateTargetDurationInM3u8(content, int(m.recordMaxFragDuration))
@@ -473,22 +463,31 @@ func (m *Muxer) writeRecordPlaylistWithAdaptiveBitrate() {
 	content, err := fslCtx.ReadFile(m.recordPlayListFilename)
 	if err != nil {
 		// m3u8文件不存在自动创建,后续也不需要更新文件内容
-		content = append(content, []byte(
+		content = append(content, []byte(fmt.Sprintf(
 			"#EXTM3U\n"+
 				"#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=640x360,CODECS=\"avc1.42e00a,mp4a.40.2\"\n"+
-				"low-record.m3u8\n"+
+				"%s/low-record.m3u8\n"+
 				"#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=1280x720,CODECS=\"avc1.42e00a,mp4a.40.2\"\n"+
-				"mid-record.m3u8\n"+
+				"%s/mid-record.m3u8\n"+
 				"#EXT-X-STREAM-INF:BANDWIDTH=3000000,RESOLUTION=1920x1080,CODECS=\"avc1.42e00a,mp4a.40.2\"\n"+
-				"high-record.m3u8")...)
+				"%s/high-record.m3u8", m.streamName, m.streamName, m.streamName))...)
 		if err := writeM3u8File(content, m.recordPlayListFilename, m.recordPlayListFilenameBak); err != nil {
 			Log.Errorf("[%s] write record m3u8 file error. err=%+v", m.UniqueKey, err)
 		}
 	}
+	// 增加cleanup_mode为0或1时删除超过过期时间的ts文件
+	// 获取待删除的fragment信息
+	frag := m.getDeleteFrag()
+	if frag.filename != "" {
+		filenameWithPath := PathStrategy.GetTsFileNameWithPath(m.outPath, frag.filename)
+		if err := fslCtx.Remove(filenameWithPath); err != nil {
+			Log.Warnf("[%s] remove stale fragment file failed. filename=%s, err=%+v", m.UniqueKey, filenameWithPath, err)
+		}
+	}
 	// 更新3个不同码率的m3u8文件的索引信息
-	m.updateRecordM3u8Helper(currFrag, m.lowRecordPlaylistFileName, fmt.Sprintf("%s.bak", m.lowRecordPlaylistFileName))
-	m.updateRecordM3u8Helper(currFrag, m.midRecordPlaylistFileName, fmt.Sprintf("%s.bak", m.midRecordPlaylistFileName))
-	m.updateRecordM3u8Helper(currFrag, m.highRecordPlaylistFileName, fmt.Sprintf("%s.bak", m.highRecordPlaylistFileName))
+	m.updateRecordM3u8Helper(currFrag, frag, m.lowRecordPlaylistFileName, fmt.Sprintf("%s.bak", m.lowRecordPlaylistFileName))
+	m.updateRecordM3u8Helper(currFrag, frag, m.midRecordPlaylistFileName, fmt.Sprintf("%s.bak", m.midRecordPlaylistFileName))
+	m.updateRecordM3u8Helper(currFrag, frag, m.highRecordPlaylistFileName, fmt.Sprintf("%s.bak", m.highRecordPlaylistFileName))
 }
 
 func (m *Muxer) writeRecordPlaylist() {
@@ -497,7 +496,16 @@ func (m *Muxer) writeRecordPlaylist() {
 	if currFrag.duration > m.recordMaxFragDuration {
 		m.recordMaxFragDuration = currFrag.duration + 0.5
 	}
-	m.updateRecordM3u8Helper(currFrag, m.recordPlayListFilename, m.recordPlayListFilenameBak)
+	// 增加cleanup_mode为0或1时删除超过过期时间的ts文件
+	// 获取待删除的fragment信息
+	frag := m.getDeleteFrag()
+	if frag.filename != "" {
+		filenameWithPath := PathStrategy.GetTsFileNameWithPath(m.outPath, frag.filename)
+		if err := fslCtx.Remove(filenameWithPath); err != nil {
+			Log.Warnf("[%s] remove stale fragment file failed. filename=%s, err=%+v", m.UniqueKey, filenameWithPath, err)
+		}
+	}
+	m.updateRecordM3u8Helper(currFrag, frag, m.recordPlayListFilename, m.recordPlayListFilenameBak)
 }
 
 func (m *Muxer) updatePlaylistM3u8Helper(isLast bool) bytes.Buffer {
@@ -536,14 +544,14 @@ func (m *Muxer) writePlaylistWithAdaptiveBitrate(isLast bool) {
 	content, err := fslCtx.ReadFile(m.playlistFilename)
 	if err != nil {
 		// m3u8文件不存在自动创建,后续也不需要更新文件内容
-		content = append(content, []byte(
+		content = append(content, []byte(fmt.Sprintf(
 			"#EXTM3U\n"+
 				"#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=640x360,CODECS=\"avc1.42e00a,mp4a.40.2\"\n"+
-				"low-playlist.m3u8\n"+
+				"%s/low-playlist.m3u8\n"+
 				"#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=1280x720,CODECS=\"avc1.42e00a,mp4a.40.2\"\n"+
-				"mid-playlist.m3u8\n"+
+				"%s/mid-playlist.m3u8\n"+
 				"#EXT-X-STREAM-INF:BANDWIDTH=3000000,RESOLUTION=1920x1080,CODECS=\"avc1.42e00a,mp4a.40.2\"\n"+
-				"high-playlist.m3u8")...)
+				"%s/high-playlist.m3u8", m.streamName, m.streamName, m.streamName))...)
 		if err := writeM3u8File(content, m.playlistFilename, m.playlistFilenameBak); err != nil {
 			Log.Errorf("[%s] write record m3u8 file error. err=%+v", m.UniqueKey, err)
 		}
