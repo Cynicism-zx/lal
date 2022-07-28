@@ -68,13 +68,24 @@ type IPathWriteStrategy interface {
 
 	// GetTsFileName ts文件名的生成策略
 	GetTsFileName(streamName string, index int, timestamp int) string
+	// GetBitRateRecordM3u8FileName 自适应码率的录播m3u8文件
+	GetBitRateRecordM3u8FileName(outPath string, streamName string) (string, string, string)
+	// GetBitRateLiveM3u8FileName 自适应码率的直播m3u8文件
+	GetBitRateLiveM3u8FileName(outPath string, streamName string) (string, string, string)
 }
 
 // ---------------------------------------------------------------------------------------------------------------------
 
 const (
-	playlistM3u8FileName = "playlist.m3u8"
-	recordM3u8FileName   = "record.m3u8"
+	playlistM3u8FileName     = "playlist.m3u8"
+	lowPlaylistM3u8FileName  = "low-playlist.m3u8"
+	midPlaylistM3u8FileName  = "mid-playlist.m3u8"
+	highPlaylistM3u8FileName = "high-playlist.m3u8"
+
+	recordM3u8FileName     = "record.m3u8"
+	lowRecordM3u8FileName  = "low-record.m3u8"
+	midRecordM3u8FileName  = "mid-record.m3u8"
+	highRecordM3u8FileName = "high-record.m3u8"
 )
 
 // DefaultPathStrategy 默认的路由，落盘策略
@@ -113,14 +124,16 @@ type DefaultPathStrategy struct {
 // /hls/test110/record.m3u8               -> record.m3u8               test110    m3u8     {rootOutPath}/test110/record.m3u8
 // /hls/test110/test110-1620540712084-.ts -> test110-1620540712084-.ts test110    ts       {rootOutPath/test110/test110-1620540712084-.ts
 // /hls/test110-1620540712084-.ts         -> test110-1620540712084-.ts test110    ts       {rootOutPath/test110/test110-1620540712084-.ts
-//
+// /hls/test110/*-playlist.m3u8           -> *-playlist.m3u8           test110    m3u8     {rootOutPath/test110/*-playlist.m3u8}
 func (dps *DefaultPathStrategy) GetRequestInfo(urlCtx base.UrlContext, rootOutPath string) (ri RequestInfo) {
 	filename := urlCtx.LastItemOfPath
 	filetype := urlCtx.GetFileType()
 	fileNameWithoutType := urlCtx.GetFilenameWithoutType()
 
 	if filetype == "m3u8" {
-		if filename == playlistM3u8FileName || filename == recordM3u8FileName {
+		if strings.Contains(filename, playlistM3u8FileName) || strings.Contains(filename, recordM3u8FileName) {
+			// 兼容hls m3u8自适应码率播放
+			//if filename == playlistM3u8FileName || filename == recordM3u8FileName {
 			uriItems := strings.Split(urlCtx.Path, "/")
 			ri.StreamName = uriItems[len(uriItems)-2]
 			ri.FileNameWithPath = filepath.Join(rootOutPath, ri.StreamName, filename)
@@ -159,4 +172,16 @@ func (*DefaultPathStrategy) GetTsFileName(streamName string, index int, timestam
 
 func (*DefaultPathStrategy) getStreamNameFromTsFileName(fileName string) string {
 	return strings.Split(fileName, "-")[0]
+}
+
+func (*DefaultPathStrategy) GetBitRateRecordM3u8FileName(outPath string, streamName string) (string, string, string) {
+	return filepath.Join(outPath, lowRecordM3u8FileName),
+		filepath.Join(outPath, midRecordM3u8FileName),
+		filepath.Join(outPath, highRecordM3u8FileName)
+}
+
+func (*DefaultPathStrategy) GetBitRateLiveM3u8FileName(outPath string, streamName string) (string, string, string) {
+	return filepath.Join(outPath, lowPlaylistM3u8FileName),
+		filepath.Join(outPath, midPlaylistM3u8FileName),
+		filepath.Join(outPath, highPlaylistM3u8FileName)
 }

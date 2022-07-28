@@ -11,10 +11,9 @@ package hls
 import (
 	"bytes"
 	"fmt"
-	"strconv"
-
 	"github.com/q191201771/lal/pkg/base"
 	"github.com/q191201771/naza/pkg/nazaerrors"
+	"strconv"
 )
 
 // writeM3u8File
@@ -52,6 +51,9 @@ func updateTargetDurationInM3u8(content []byte, currDuration int) ([]byte, error
 	if err != nil {
 		return content, err
 	}
+	if err != nil {
+		return content, err
+	}
 	if currDuration > oldDuration {
 		tmpContent := make([]byte, l)
 		copy(tmpContent, content[:l])
@@ -59,6 +61,40 @@ func updateTargetDurationInM3u8(content []byte, currDuration int) ([]byte, error
 		tmpContent = append(tmpContent, content[l+r:]...)
 		content = tmpContent
 	}
+	return content, nil
+}
+
+// deleteTsInM3u8 删除record.m3u8文件中过期的ts文件
+// @param content      原m3u8文件的内容
+// @param ts           过期ts文件
+//
+// @return 处理后的m3u8文件内容
+//
+func delTsInM3u8(content []byte, frag *fragmentInfo) ([]byte, error) {
+	// 更新SEQUENCE
+	s := bytes.Index(content, []byte("#EXT-X-MEDIA-SEQUENCE:"))
+	rr := bytes.Index(content[s:], []byte{'\n'})
+	tmp := make([]byte, s)
+	copy(tmp, content[:s])
+	tmp = append(tmp, []byte(fmt.Sprintf("#EXT-X-MEDIA-SEQUENCE:%d", frag.id+1))...)
+	tmp = append(tmp, content[s+rr:]...)
+	content = tmp
+	// 删除ts文件记录
+	delLines := fmt.Sprintf("#EXTINF:%.3f,\n%s\n", frag.duration, frag.filename)
+	l := bytes.Index(content, []byte(delLines))
+	if l == -1 {
+		return nil, nazaerrors.Wrap(base.ErrHls)
+	}
+	delLines = fmt.Sprintf("%s\n", frag.filename)
+	ll := bytes.Index(content, []byte(delLines))
+	r := bytes.Index(content[ll:], []byte{'\n'})
+	if r == -1 {
+		return nil, nazaerrors.Wrap(base.ErrHls)
+	}
+	tmpContent := make([]byte, l)
+	copy(tmpContent, content[:l])
+	tmpContent = append(tmpContent, content[ll+r+1:]...)
+	content = tmpContent
 	return content, nil
 }
 

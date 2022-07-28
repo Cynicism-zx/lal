@@ -202,6 +202,7 @@ func (group *Group) broadcastByRtmpMsg(msg base.RtmpMsg) {
 
 	// # mpegts remuxer
 	if group.rtmp2MpegtsRemuxer != nil {
+		// rtmp2hls
 		group.rtmp2MpegtsRemuxer.FeedRtmpMessage(msg)
 	}
 
@@ -340,6 +341,7 @@ func (group *Group) broadcastByRtmpMsg(msg base.RtmpMsg) {
 
 	// # 录制flv文件
 	if group.recordFlv != nil {
+		// 流写入打开的flv文件
 		if err := group.recordFlv.WriteRaw(lazyRtmpMsg2FlvTag.GetEnsureWithoutSdf()); err != nil {
 			Log.Errorf("[%s] record flv write error. err=%+v", group.UniqueKey, err)
 		}

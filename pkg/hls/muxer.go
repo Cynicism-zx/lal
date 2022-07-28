@@ -40,13 +40,15 @@ type MuxerConfig struct {
 	FragmentDurationMs int    `json:"fragment_duration_ms"`
 	FragmentNum        int    `json:"fragment_num"`
 	DeleteThreshold    int    `json:"delete_threshold"`
+	AdaptiveBitrate    bool   `json:"adaptive_bitrate"`
+	SaveDuration       int    `json:"save_duration"`
 	CleanupMode        int    `json:"cleanup_mode"` // TODO chef: lalserver的模式1的逻辑是在上层做的，应该重构到hls模块中
 }
 
 const (
-	CleanupModeNever    = 0
-	CleanupModeInTheEnd = 1
-	CleanupModeAsap     = 2
+	CleanupModeNever = iota
+	CleanupModeInTheEnd
+	CleanupModeAsap
 )
 
 // Muxer
@@ -56,12 +58,20 @@ const (
 type Muxer struct {
 	UniqueKey string
 
-	streamName                string // const after init
-	outPath                   string // const after init
-	playlistFilename          string // const after init
-	playlistFilenameBak       string // const after init
-	recordPlayListFilename    string // const after init
-	recordPlayListFilenameBak string // const after init
+	streamName string // const after init
+	outPath    string // const after init
+
+	playlistFilename     string // const after init
+	lowPlaylistFileName  string // const after init
+	midPlaylistFileName  string // const after init
+	highPlaylistFileName string // const after init
+	playlistFilenameBak  string // const after init
+
+	recordPlayListFilename     string // const after init
+	lowRecordPlaylistFileName  string // const after init
+	midRecordPlaylistFileName  string // const after init
+	highRecordPlaylistFileName string // const after init
+	recordPlayListFilenameBak  string // const after init
 
 	config   *MuxerConfig
 	observer IMuxerObserver
@@ -104,16 +114,24 @@ func NewMuxer(streamName string, config *MuxerConfig, observer IMuxerObserver) *
 	recordPlaylistFilename := PathStrategy.GetRecordM3u8FileName(op, streamName)
 	playlistFilenameBak := fmt.Sprintf("%s.bak", playlistFilename)
 	recordPlaylistFilenameBak := fmt.Sprintf("%s.bak", recordPlaylistFilename)
+	lowPlaylistFileName, midPlaylistFileName, highPlaylistFileName := PathStrategy.GetBitRateLiveM3u8FileName(op, streamName)
+	lowRecordPlaylistFileName, midRecordPlaylistFileName, highRecordPlaylistFileName := PathStrategy.GetBitRateRecordM3u8FileName(op, streamName)
 	m := &Muxer{
-		UniqueKey:                 uk,
-		streamName:                streamName,
-		outPath:                   op,
-		playlistFilename:          playlistFilename,
-		playlistFilenameBak:       playlistFilenameBak,
-		recordPlayListFilename:    recordPlaylistFilename,
-		recordPlayListFilenameBak: recordPlaylistFilenameBak,
-		config:                    config,
-		observer:                  observer,
+		UniqueKey:                  uk,
+		streamName:                 streamName,
+		outPath:                    op,
+		playlistFilename:           playlistFilename,
+		lowPlaylistFileName:        lowPlaylistFileName,
+		midPlaylistFileName:        midPlaylistFileName,
+		highPlaylistFileName:       highPlaylistFileName,
+		playlistFilenameBak:        playlistFilenameBak,
+		recordPlayListFilename:     recordPlaylistFilename,
+		lowRecordPlaylistFileName:  lowRecordPlaylistFileName,
+		midRecordPlaylistFileName:  midRecordPlaylistFileName,
+		highRecordPlaylistFileName: highRecordPlaylistFileName,
+		recordPlayListFilenameBak:  recordPlaylistFilenameBak,
+		config:                     config,
+		observer:                   observer,
 	}
 	m.makeFrags()
 	Log.Infof("[%s] lifecycle new hls muxer. muxer=%p, streamName=%s", uk, m, streamName)
@@ -213,6 +231,7 @@ func (m *Muxer) updateFragment(ts uint64, boundary bool) error {
 		//        2. 一直没有I帧导致没有合适的时间重新切片，堆积的包达到阈值
 		// 2. 往回跳跃超过了阈值
 		//
+		//maxfraglen := uint64(m.config.FragmentDurationMs)
 		maxfraglen := uint64(m.config.FragmentDurationMs * 90 * 10)
 		if (ts > m.fragTs && ts-m.fragTs > maxfraglen) || (m.fragTs > ts && m.fragTs-ts > negMaxfraglen) {
 			Log.Warnf("[%s] force fragment split. fragTs=%d, ts=%d", m.UniqueKey, m.fragTs, ts)
@@ -225,6 +244,7 @@ func (m *Muxer) updateFragment(ts uint64, boundary bool) error {
 			}
 		}
 		// FIXME: 解决ts分片时长不一致的问题
+		// TODO: m3u8多码率适配
 		// 更新当前分片的时间长度
 		//
 		// TODO chef:
@@ -274,7 +294,7 @@ func (m *Muxer) openFragment(ts uint64, discont bool) error {
 	}
 	// 将rtmp流保存hls文件
 	id := m.getFragmentId()
-
+	// 流信息写入.ts文件
 	filename := PathStrategy.GetTsFileName(m.streamName, id, int(Clock.Now().UnixNano()/1e6))
 	filenameWithPath := PathStrategy.GetTsFileNameWithPath(m.outPath, filename)
 
@@ -287,7 +307,7 @@ func (m *Muxer) openFragment(ts uint64, discont bool) error {
 	}
 
 	m.opened = true
-
+	// 更新指定索引位的frag信息
 	frag := m.getCurrFrag()
 	frag.discont = discont
 	frag.id = id
@@ -300,7 +320,7 @@ func (m *Muxer) openFragment(ts uint64, discont bool) error {
 	if m.observer != nil {
 		m.observer.OnFragmentOpen()
 	}
-
+	// 将新fragment加入m.frags中
 	m.observer.OnHlsMakeTs(base.HlsMakeTsInfo{
 		Event:          "open",
 		StreamName:     m.streamName,
@@ -333,13 +353,23 @@ func (m *Muxer) closeFragment(isLast bool) error {
 
 	// 更新序号，为下个分片做准备
 	// 注意，后面使用序号的逻辑，都依赖该处
+	// TODO: 解决m3u8自适应码率
 	m.incrFrag()
-
-	m.writePlaylist(isLast)
+	switch m.config.AdaptiveBitrate {
+	case true:
+		m.writePlaylistWithAdaptiveBitrate(isLast)
+	default:
+		m.writePlaylist(isLast)
+	}
 
 	if m.config.CleanupMode == CleanupModeNever || m.config.CleanupMode == CleanupModeInTheEnd {
 		// FIXME: 删除超过规定保留时间的ts文件(更新playlist.m3u8和record.m3u8)
-		m.writeRecordPlaylist()
+		switch m.config.AdaptiveBitrate {
+		case true:
+			m.writeRecordPlaylistWithAdaptiveBitrate()
+		default:
+			m.writeRecordPlaylist()
+		}
 	}
 	if m.config.CleanupMode == CleanupModeAsap {
 		// 获取待删除的fragment信息
@@ -365,19 +395,35 @@ func (m *Muxer) closeFragment(isLast bool) error {
 	return nil
 }
 
-func (m *Muxer) writeRecordPlaylist() {
-	// 找出整个直播流从开始到结束最大的分片时长
-	currFrag := m.getClosedFrag()
-	if currFrag.duration > m.recordMaxFragDuration {
-		m.recordMaxFragDuration = currFrag.duration + 0.5
+// updateM3u8Helper 更新m3u8文件帮助函数
+func (m *Muxer) updateRecordM3u8Helper(fragNow *fragmentInfo, m3u8, m3u8bak string) {
+	// 增加cleanup_mode为0或1时删除超过过期时间的ts文件
+	// 获取待删除的fragment信息
+	frag := m.getDeleteFrag()
+	if frag.filename != "" {
+		filenameWithPath := PathStrategy.GetTsFileNameWithPath(m.outPath, frag.filename)
+		if err := fslCtx.Remove(filenameWithPath); err != nil {
+			Log.Warnf("[%s] remove stale fragment file failed. filename=%s, err=%+v", m.UniqueKey, filenameWithPath, err)
+		}
 	}
+	fragLines := fmt.Sprintf("#EXTINF:%.3f,\n%s\n", fragNow.duration, fragNow.filename)
 
-	fragLines := fmt.Sprintf("#EXTINF:%.3f,\n%s\n", currFrag.duration, currFrag.filename)
-
-	content, err := fslCtx.ReadFile(m.recordPlayListFilename)
+	content, err := fslCtx.ReadFile(m3u8)
 	if err == nil {
+		maxFrag := float64(m.config.FragmentDurationMs) / 1000
+		m.iterateFragsInPlaylist(func(frag *fragmentInfo) {
+			if frag.duration > maxFrag {
+				maxFrag = frag.duration + 0.5
+			}
+		})
+		// 删除record.m3u8中此过期文件的记录
+		if frag.filename != "" {
+			if content, err = delTsInM3u8(content, frag); err != nil {
+				Log.Errorf("delete expired ts file in record.m3u8 file err: %s", err.Error())
+			}
+		}
+		fmt.Println(string(content))
 		// m3u8文件已经存在
-
 		content = bytes.TrimSuffix(content, []byte("#EXT-X-ENDLIST\n"))
 		content, err = updateTargetDurationInM3u8(content, int(m.recordMaxFragDuration))
 		if err != nil {
@@ -385,7 +431,7 @@ func (m *Muxer) writeRecordPlaylist() {
 			return
 		}
 
-		if currFrag.discont {
+		if fragNow.discont {
 			content = append(content, []byte("#EXT-X-DISCONTINUITY\n")...)
 		}
 
@@ -399,7 +445,7 @@ func (m *Muxer) writeRecordPlaylist() {
 		buf.WriteString(fmt.Sprintf("#EXT-X-TARGETDURATION:%d\n", int(m.recordMaxFragDuration)))
 		buf.WriteString(fmt.Sprintf("#EXT-X-MEDIA-SEQUENCE:%d\n\n", 0))
 
-		if currFrag.discont {
+		if fragNow.discont {
 			buf.WriteString("#EXT-X-DISCONTINUITY\n")
 		}
 
@@ -408,13 +454,53 @@ func (m *Muxer) writeRecordPlaylist() {
 
 		content = buf.Bytes()
 	}
-
-	if err := writeM3u8File(content, m.recordPlayListFilename, m.recordPlayListFilenameBak); err != nil {
+	if err := writeM3u8File(content, m3u8, m3u8bak); err != nil {
 		Log.Errorf("[%s] write record m3u8 file error. err=%+v", m.UniqueKey, err)
 	}
+	return
 }
 
-func (m *Muxer) writePlaylist(isLast bool) {
+// writeRecordPlaylistWithAdaptiveBitrate 生成自适应码率record.m3u8文件
+func (m *Muxer) writeRecordPlaylistWithAdaptiveBitrate() {
+	// 找出整个直播流从开始到结束最大的分片时长
+	currFrag := m.getClosedFrag()
+	if currFrag.duration > m.recordMaxFragDuration {
+		m.recordMaxFragDuration = currFrag.duration + 0.5
+	}
+
+	//fragLines := fmt.Sprintf("#EXTINF:%.3f,\n%s\n", currFrag.duration, currFrag.filename)
+
+	content, err := fslCtx.ReadFile(m.recordPlayListFilename)
+	if err != nil {
+		// m3u8文件不存在自动创建,后续也不需要更新文件内容
+		content = append(content, []byte(
+			"#EXTM3U\n"+
+				"#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=640x360,CODECS=\"avc1.42e00a,mp4a.40.2\"\n"+
+				"low-record.m3u8\n"+
+				"#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=1280x720,CODECS=\"avc1.42e00a,mp4a.40.2\"\n"+
+				"mid-record.m3u8\n"+
+				"#EXT-X-STREAM-INF:BANDWIDTH=3000000,RESOLUTION=1920x1080,CODECS=\"avc1.42e00a,mp4a.40.2\"\n"+
+				"high-record.m3u8")...)
+		if err := writeM3u8File(content, m.recordPlayListFilename, m.recordPlayListFilenameBak); err != nil {
+			Log.Errorf("[%s] write record m3u8 file error. err=%+v", m.UniqueKey, err)
+		}
+	}
+	// 更新3个不同码率的m3u8文件的索引信息
+	m.updateRecordM3u8Helper(currFrag, m.lowRecordPlaylistFileName, fmt.Sprintf("%s.bak", m.lowRecordPlaylistFileName))
+	m.updateRecordM3u8Helper(currFrag, m.midRecordPlaylistFileName, fmt.Sprintf("%s.bak", m.midRecordPlaylistFileName))
+	m.updateRecordM3u8Helper(currFrag, m.highRecordPlaylistFileName, fmt.Sprintf("%s.bak", m.highRecordPlaylistFileName))
+}
+
+func (m *Muxer) writeRecordPlaylist() {
+	// 找出整个直播流从开始到结束最大的分片时长
+	currFrag := m.getClosedFrag()
+	if currFrag.duration > m.recordMaxFragDuration {
+		m.recordMaxFragDuration = currFrag.duration + 0.5
+	}
+	m.updateRecordM3u8Helper(currFrag, m.recordPlayListFilename, m.recordPlayListFilenameBak)
+}
+
+func (m *Muxer) updatePlaylistM3u8Helper(isLast bool) bytes.Buffer {
 	// 找出时长最长的fragment
 	maxFrag := float64(m.config.FragmentDurationMs) / 1000
 	m.iterateFragsInPlaylist(func(frag *fragmentInfo) {
@@ -439,9 +525,45 @@ func (m *Muxer) writePlaylist(isLast bool) {
 		buf.WriteString(fmt.Sprintf("#EXTINF:%.3f,\n%s\n", frag.duration, frag.filename))
 	})
 
-	if isLast {
-		buf.WriteString("#EXT-X-ENDLIST\n")
+	//if isLast {
+	//	buf.WriteString("#EXT-X-ENDLIST\n")
+	//}
+	return buf
+}
+
+// writePlaylistWithAdaptiveBitrate 生成自适应码率的playlist.m3u8文件
+func (m *Muxer) writePlaylistWithAdaptiveBitrate(isLast bool) {
+	content, err := fslCtx.ReadFile(m.playlistFilename)
+	if err != nil {
+		// m3u8文件不存在自动创建,后续也不需要更新文件内容
+		content = append(content, []byte(
+			"#EXTM3U\n"+
+				"#EXT-X-STREAM-INF:BANDWIDTH=1000000,RESOLUTION=640x360,CODECS=\"avc1.42e00a,mp4a.40.2\"\n"+
+				"low-playlist.m3u8\n"+
+				"#EXT-X-STREAM-INF:BANDWIDTH=2000000,RESOLUTION=1280x720,CODECS=\"avc1.42e00a,mp4a.40.2\"\n"+
+				"mid-playlist.m3u8\n"+
+				"#EXT-X-STREAM-INF:BANDWIDTH=3000000,RESOLUTION=1920x1080,CODECS=\"avc1.42e00a,mp4a.40.2\"\n"+
+				"high-playlist.m3u8")...)
+		if err := writeM3u8File(content, m.playlistFilename, m.playlistFilenameBak); err != nil {
+			Log.Errorf("[%s] write record m3u8 file error. err=%+v", m.UniqueKey, err)
+		}
 	}
+	// 更新3个自适应码率的直播m3u8文件
+	buf := m.updatePlaylistM3u8Helper(isLast)
+
+	if err := writeM3u8File(buf.Bytes(), m.lowPlaylistFileName, fmt.Sprintf("%s.bak", m.lowPlaylistFileName)); err != nil {
+		Log.Errorf("[%s] write low bitrate live m3u8 file error. err=%+v", m.UniqueKey, err)
+	}
+	if err := writeM3u8File(buf.Bytes(), m.midPlaylistFileName, fmt.Sprintf("%s.bak", m.midPlaylistFileName)); err != nil {
+		Log.Errorf("[%s] write mid bitrate live m3u8 file error. err=%+v", m.UniqueKey, err)
+	}
+	if err := writeM3u8File(buf.Bytes(), m.highPlaylistFileName, fmt.Sprintf("%s.bak", m.highPlaylistFileName)); err != nil {
+		Log.Errorf("[%s] write high bitrate live m3u8 file error. err=%+v", m.UniqueKey, err)
+	}
+}
+
+func (m *Muxer) writePlaylist(isLast bool) {
+	buf := m.updatePlaylistM3u8Helper(isLast)
 
 	if err := writeM3u8File(buf.Bytes(), m.playlistFilename, m.playlistFilenameBak); err != nil {
 		Log.Errorf("[%s] write live m3u8 file error. err=%+v", m.UniqueKey, err)
@@ -460,6 +582,10 @@ func (m *Muxer) fragsCapacity() int {
 	return m.config.FragmentNum + m.config.DeleteThreshold + 1
 }
 
+func (m *Muxer) fragsSaveDurationCapacity() int {
+	return m.config.FragmentNum + m.config.DeleteThreshold + 1
+}
+
 func (m *Muxer) makeFrags() {
 	m.frags = make([]fragmentInfo, m.fragsCapacity())
 }
@@ -469,6 +595,7 @@ func (m *Muxer) getFragmentId() int {
 	return m.frag + m.nfrags
 }
 
+// getFrag 获取环形队列指定index的frag信息
 func (m *Muxer) getFrag(n int) *fragmentInfo {
 	return &m.frags[(m.frag+n)%m.fragsCapacity()]
 }

@@ -19,6 +19,7 @@
 /conf/https.conf.json
 
 lal_record
+video
 logs
 testdata
 
