@@ -279,7 +279,8 @@ func (group *Group) delPullSession(session base.IObject) {
 // addIn 有pub或pull的输入型session加入时，需要调用该函数
 //
 func (group *Group) addIn() {
-	now := time.Now().Format("20060102")
+	now := time.Now().Format("200601021504")
+	//now := gconv.String(time.Now().Unix())
 
 	if group.shouldStartMpegtsRemuxer() {
 		group.rtmp2MpegtsRemuxer = remux.NewRtmp2MpegtsRemuxer(group)
@@ -287,7 +288,7 @@ func (group *Group) addIn() {
 
 	group.startPushIfNeeded()
 	group.startHlsIfNeeded()
-	group.startRecordFlvIfNeeded(now, 0)
+	group.startRecordFlvIfNeeded(now)
 	// hls录制
 	group.startRecordMpegtsIfNeeded(now)
 }

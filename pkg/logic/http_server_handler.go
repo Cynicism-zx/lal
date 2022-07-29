@@ -67,6 +67,7 @@ func (h *HttpServerHandler) ServeSubSession(writer http.ResponseWriter, req *htt
 	}
 
 	if strings.HasSuffix(urlCtx.LastItemOfPath, ".flv") {
+		// TODO: 区分一下是live还是On-demand(点播)
 		session := httpflv.NewSubSession(conn, urlCtx, isWebSocket, webSocketKey)
 		Log.Debugf("[%s] < read http request. url=%s", session.UniqueKey(), session.Url())
 		if err = h.observer.OnNewHttpflvSubSession(session); err != nil {

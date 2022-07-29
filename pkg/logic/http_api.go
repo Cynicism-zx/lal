@@ -14,6 +14,8 @@ import (
 	"io/ioutil"
 	"net"
 	"net/http"
+	"os"
+	"path/filepath"
 
 	"github.com/q191201771/naza/pkg/nazahttp"
 
@@ -51,7 +53,9 @@ func (h *HttpApiServer) RunLoop() error {
 	mux.HandleFunc("/api/ctrl/start_relay_pull", h.ctrlStartRelayPullHandler)
 	mux.HandleFunc("/api/ctrl/stop_relay_pull", h.ctrlStopRelayPullHandler)
 	mux.HandleFunc("/api/ctrl/kick_session", h.ctrlKickSessionHandler)
-	mux.HandleFunc("/", h.notFoundHandler)
+	mux.HandleFunc("/api/video/get", h.getVideo)
+	mux.HandleFunc("/api/video/del", h.delVideo)
+	//mux.HandleFunc("/", h.notFoundHandler)
 
 	var srv http.Server
 	srv.Handler = mux
@@ -211,4 +215,59 @@ func unmarshalRequestJsonBody(r *http.Request, info interface{}, keyFieldList ..
 	}
 
 	return j, json.Unmarshal(body, info)
+}
+
+// getVideo 获取历史视频资源
+func (h *HttpApiServer) getVideo(w http.ResponseWriter, req *http.Request) {
+	video := make([]string, 100)
+	// 先暂时不鉴权
+	q := req.URL.Query()
+	stream := q.Get("stream")
+	dir := filepath.Join(h.sm.config.RecordConfig.FlvOutPath, stream)
+	files, err := ioutil.ReadDir(dir)
+	if err != nil {
+		feedback(base.ApiVideo{
+			HttpResponseBasic: base.HttpResponseBasic{
+				ErrorCode: 400,
+				Desp:      "读取视频文件目录失败",
+			},
+		}, w)
+		return
+	}
+	for _, f := range files {
+		video = append(video, f.Name())
+	}
+	feedback(base.ApiVideo{
+		HttpResponseBasic: base.HttpResponseBasic{
+			ErrorCode: 200,
+			Desp:      "获取成功",
+		},
+		Data: video,
+	}, w)
+	return
+}
+
+// delVideo 删除历史视频资源
+func (h *HttpApiServer) delVideo(w http.ResponseWriter, req *http.Request) {
+	// 先暂时不鉴权
+	q := req.URL.Query()
+	name := q.Get("video")
+	// FIXME: 需要知道是哪个流下边的视频资源
+	file := filepath.Join(h.sm.config.RecordConfig.FlvOutPath, name)
+	if err := os.Remove(file); err != nil {
+		feedback(base.ApiVideo{
+			HttpResponseBasic: base.HttpResponseBasic{
+				ErrorCode: 400,
+				Desp:      "删除视频失败",
+			},
+		}, w)
+		return
+	}
+	feedback(base.ApiVideo{
+		HttpResponseBasic: base.HttpResponseBasic{
+			ErrorCode: 200,
+			Desp:      "删除成功",
+		},
+	}, w)
+	return
 }

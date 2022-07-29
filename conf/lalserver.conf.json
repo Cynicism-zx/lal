@@ -53,7 +53,8 @@
     "enable_flv": true,
     "flv_out_path": "./video/flv/",
     "enable_mpegts": false,
-    "mpegts_out_path": "./video/mpegts"
+    "mpegts_out_path": "./video/mpegts",
+    "duration": 1
   },
   "relay_push": {
     "enable": false,

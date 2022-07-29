@@ -190,7 +190,7 @@ func (sm *ServerManager) RunLoop() error {
 		}
 		return nil
 	}
-
+	// 3个http服务共用一个端口,请求时区分路径
 	if err := addMux(sm.config.HttpflvConfig.CommonHttpServerConfig, sm.httpServerHandler.ServeSubSession, "httpflv"); err != nil {
 		return err
 	}

@@ -9,18 +9,17 @@
 package logic
 
 import (
-	"github.com/q191201771/lal/pkg/mpegts"
-	"github.com/q191201771/lal/pkg/rtmp"
-	"github.com/q191201771/naza/pkg/nazalog"
-	"net"
-	"time"
-
 	"github.com/q191201771/lal/pkg/avc"
 	"github.com/q191201771/lal/pkg/base"
 	"github.com/q191201771/lal/pkg/hevc"
+	"github.com/q191201771/lal/pkg/mpegts"
 	"github.com/q191201771/lal/pkg/remux"
+	"github.com/q191201771/lal/pkg/rtmp"
 	"github.com/q191201771/lal/pkg/rtprtcp"
 	"github.com/q191201771/lal/pkg/sdp"
+	"github.com/q191201771/naza/pkg/nazalog"
+	"net"
+	"time"
 )
 
 // group__streaming.go
@@ -331,23 +330,27 @@ func (group *Group) broadcastByRtmpMsg(msg base.RtmpMsg) {
 		// 是否在等待关键帧
 		if session.ShouldWaitVideoKeyFrame {
 			if msg.IsVideoKeyNalu() {
-				session.Write(lazyRtmpMsg2FlvTag.GetEnsureWithoutSdf())
+				session.Write(lazyRtmpMsg2FlvTag.GetEnsureWithoutSdf().Raw)
 				session.ShouldWaitVideoKeyFrame = false
 			}
 		} else {
-			session.Write(lazyRtmpMsg2FlvTag.GetEnsureWithoutSdf())
+			session.Write(lazyRtmpMsg2FlvTag.GetEnsureWithoutSdf().Raw)
 		}
 	}
 
 	// # 录制flv文件
 	if group.recordFlv != nil {
-		// 流写入打开的flv文件
-		if err := group.recordFlv.WriteRaw(lazyRtmpMsg2FlvTag.GetEnsureWithoutSdf()); err != nil {
-			Log.Errorf("[%s] record flv write error. err=%+v", group.UniqueKey, err)
-			now := time.Now().Format("20060102")
-			group.startRecordFlvIfNeeded(now, group.recordFlv.Now+1)
-			// FIXME: 可能有一部分字节串已写入上一个flv文件,需要解决
-			if err := group.recordFlv.WriteRaw(lazyRtmpMsg2FlvTag.GetEnsureWithoutSdf()); err != nil {
+		rtmpBytes := lazyRtmpMsg2FlvTag.GetEnsureWithoutSdf()
+		// 流写入打开的flv文件(TODO: flv文件按小时切割)
+		if rtmpBytes.Header.Timestamp-group.recordFlv.CutAt >= uint32(group.config.RecordConfig.Duration*60*1000) {
+			now := time.Now().Format("200601021504")
+			group.startRecordFlvIfNeeded(now)
+			if err := group.recordFlv.WriteRaw(rtmpBytes.Raw); err != nil {
+				Log.Errorf("[%s] record flv write error. err=%+v", group.UniqueKey, err)
+			}
+			group.recordFlv.CutAt = rtmpBytes.Header.Timestamp
+		} else {
+			if err := group.recordFlv.WriteRaw(rtmpBytes.Raw); err != nil {
 				Log.Errorf("[%s] record flv write error. err=%+v", group.UniqueKey, err)
 			}
 		}
@@ -361,10 +364,10 @@ func (group *Group) broadcastByRtmpMsg(msg base.RtmpMsg) {
 		}
 	}
 	if group.config.HttpflvConfig.Enable {
-		group.httpflvGopCache.Feed(msg, lazyRtmpMsg2FlvTag.GetEnsureWithoutSdf())
+		group.httpflvGopCache.Feed(msg, lazyRtmpMsg2FlvTag.GetEnsureWithoutSdf().Raw)
 		if msg.Header.MsgTypeId == base.RtmpTypeIdMetadata {
 			// 注意，因为withSdf实际上用不上，而且我们也没实现，所以全部用without了
-			group.httpflvGopCache.SetMetadata(lazyRtmpMsg2FlvTag.GetEnsureWithoutSdf(), lazyRtmpMsg2FlvTag.GetEnsureWithoutSdf())
+			group.httpflvGopCache.SetMetadata(lazyRtmpMsg2FlvTag.GetEnsureWithoutSdf().Raw, lazyRtmpMsg2FlvTag.GetEnsureWithoutSdf().Raw)
 		}
 	}
 

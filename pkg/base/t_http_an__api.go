@@ -93,3 +93,8 @@ type ApiCtrlStopRelayPull struct {
 		SessionId string `json:"session_id"`
 	} `json:"data"`
 }
+
+type ApiVideo struct {
+	HttpResponseBasic
+	Data interface{} `json:"data"`
+}

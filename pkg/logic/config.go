@@ -94,6 +94,7 @@ type RecordConfig struct {
 	FlvOutPath    string `json:"flv_out_path"`
 	EnableMpegts  bool   `json:"enable_mpegts"`
 	MpegtsOutPath string `json:"mpegts_out_path"`
+	Duration      int64  `json:"duration"` // 文件切割时长
 }
 
 type RelayPushConfig struct {

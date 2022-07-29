@@ -32,27 +32,27 @@ func RtmpMsg2FlvTag(msg base.RtmpMsg) *httpflv.Tag {
 type LazyRtmpMsg2FlvTag struct {
 	msg base.RtmpMsg
 	//tagWithSdf []byte
-	tagWithoutSdf []byte
+	tagWithoutSdf *httpflv.Tag
 }
 
 func (l *LazyRtmpMsg2FlvTag) Init(msg base.RtmpMsg) {
 	l.msg = msg
 }
 
-func (l *LazyRtmpMsg2FlvTag) GetEnsureWithSdf() []byte {
+func (l *LazyRtmpMsg2FlvTag) GetEnsureWithSdf() *httpflv.Tag {
 	// TODO(chef): [refactor] 这个函数目前没有实际用途 202207
 	nazalog.Errorf("LazyRtmpMsg2FlvTag::GetEnsureWithSdf() is not implemented")
 	return l.GetEnsureWithoutSdf()
 }
 
-func (l *LazyRtmpMsg2FlvTag) GetEnsureWithoutSdf() []byte {
+func (l *LazyRtmpMsg2FlvTag) GetEnsureWithoutSdf() *httpflv.Tag {
 	if l.tagWithoutSdf == nil {
 		if l.msg.Header.MsgTypeId == base.RtmpTypeIdMetadata {
 			msg2 := l.msg.Clone()
 			msg2.Payload, _ = rtmp.MetadataEnsureWithoutSdf(msg2.Payload)
-			l.tagWithoutSdf = RtmpMsg2FlvTag(msg2).Raw
+			l.tagWithoutSdf = RtmpMsg2FlvTag(msg2)
 		} else {
-			l.tagWithoutSdf = RtmpMsg2FlvTag(l.msg).Raw
+			l.tagWithoutSdf = RtmpMsg2FlvTag(l.msg)
 		}
 	}
 	return l.tagWithoutSdf
