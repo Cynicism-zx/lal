@@ -10,6 +10,7 @@ package remux
 
 import (
 	"encoding/hex"
+	"github.com/q191201771/lal/pkg/h2645"
 	"math/rand"
 	"time"
 
@@ -82,11 +83,6 @@ func (r *Rtmp2RtspRemuxer) FeedRtmpMsg(msg base.RtmpMsg) {
 		}
 	}
 
-	if msg.Header.MsgTypeId == base.RtmpTypeIdMetadata {
-		// noop
-		return
-	}
-
 	// 我们需要先接收一部分rtmp数据，得到音频头、视频头
 	// 并且考虑，流中只有音频或只有视频的情况
 	// 我们把前面这个阶段叫做Analyze分析阶段
@@ -118,6 +114,7 @@ func (r *Rtmp2RtspRemuxer) FeedRtmpMsg(msg base.RtmpMsg) {
 	// 正常阶段
 
 	// 音视频头已通过sdp回调，rtp数据中不再包含音视频头
+	// TODO(chef): [opt] RtspRemuxerAddSpsPps2KeyFrameFlag 开启时，考虑更新sps 202207
 	if msg.IsAvcKeySeqHeader() || msg.IsHevcKeySeqHeader() || msg.IsAacSeqHeader() {
 		return
 	}
@@ -158,6 +155,7 @@ func (r *Rtmp2RtspRemuxer) doAnalyze() {
 // 是否应该退出Analyze阶段
 func (r *Rtmp2RtspRemuxer) isAnalyzeEnough() bool {
 	// 音视频头都收集好了
+	// 注意，这里故意只判断sps和pps，从而同时支持h264和2h65的情况
 	if r.sps != nil && r.pps != nil && r.asc != nil {
 		return true
 	}
@@ -186,10 +184,20 @@ func (r *Rtmp2RtspRemuxer) remux(msg base.RtmpMsg) {
 	case base.RtmpTypeIdVideo:
 		packer = r.getVideoPacker()
 		if packer != nil {
+			payload := msg.Payload[5:]
+			if RtspRemuxerAddSpsPps2KeyFrameFlag {
+				if msg.IsAvcKeyNalu() && r.sps != nil && r.pps != nil {
+					payload = h2645.JoinNaluAvcc(r.sps, r.pps, msg.Payload[9:])
+				}
+				if msg.IsHevcKeyNalu() && r.vps != nil && r.sps != nil && r.pps != nil {
+					payload = h2645.JoinNaluAvcc(r.vps, r.sps, r.pps, msg.Payload[9:])
+				}
+			}
+
 			rtppkts = r.getVideoPacker().Pack(base.AvPacket{
 				Timestamp:   int64(msg.Header.TimestampAbs),
 				PayloadType: r.videoPt,
-				Payload:     msg.Payload[5:],
+				Payload:     payload,
 			})
 		}
 	}

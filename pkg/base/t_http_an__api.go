@@ -32,9 +32,15 @@ type ApiCtrlStartRelayPullReq struct {
 	RtspMode                 int    `json:"rtsp_mode"`
 }
 
-type ApiCtrlKickSession struct {
+type ApiCtrlKickSessionReq struct {
 	StreamName string `json:"stream_name"`
 	SessionId  string `json:"session_id"`
+}
+
+type ApiCtrlStartRtpPubReq struct {
+	StreamName string `json:"stream_name"`
+	Port       int    `json:"port"`
+	TimeoutMs  int    `json:"timeout_ms"`
 }
 
 // ----- response ------------------------------------------------------------------------------------------------------
@@ -97,4 +103,13 @@ type ApiCtrlStopRelayPull struct {
 type ApiVideo struct {
 	HttpResponseBasic
 	Data interface{} `json:"data"`
+}
+
+type ApiCtrlStartRtpPub struct {
+	HttpResponseBasic
+	Data struct {
+		StreamName string `json:"stream_name"`
+		SessionId  string `json:"session_id"`
+		Port       int    `json:"port"`
+	}
 }
