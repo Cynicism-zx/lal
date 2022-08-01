@@ -19,7 +19,6 @@ import (
 	"github.com/q191201771/lal/pkg/sdp"
 	"github.com/q191201771/naza/pkg/nazalog"
 	"net"
-	"time"
 )
 
 // group__streaming.go
@@ -341,18 +340,14 @@ func (group *Group) broadcastByRtmpMsg(msg base.RtmpMsg) {
 	// # 录制flv文件
 	if group.recordFlv != nil {
 		rtmpBytes := lazyRtmpMsg2FlvTag.GetEnsureWithoutSdf()
-		// 流写入打开的flv文件(TODO: flv文件按小时切割)
-		if rtmpBytes.Header.Timestamp-group.recordFlv.CutAt >= uint32(group.config.RecordConfig.Duration*60*1000) {
-			now := time.Now().Format("200601021504")
-			group.startRecordFlvIfNeeded(now)
-			if err := group.recordFlv.WriteRaw(rtmpBytes.Raw); err != nil {
-				Log.Errorf("[%s] record flv write error. err=%+v", group.UniqueKey, err)
-			}
-			group.recordFlv.CutAt = rtmpBytes.Header.Timestamp
-		} else {
-			if err := group.recordFlv.WriteRaw(rtmpBytes.Raw); err != nil {
-				Log.Errorf("[%s] record flv write error. err=%+v", group.UniqueKey, err)
-			}
+		//// 流写入打开的flv文件(TODO: flv文件按小时切割)
+		//if rtmpBytes.Header.Timestamp-group.recordFlv.CutAt >= uint32(group.config.RecordConfig.Duration*60*1000) {
+		//	now := time.Now().Format("200601021504")
+		//	group.startRecordFlvIfNeeded(now)
+		//	group.recordFlv.CutAt = rtmpBytes.Header.Timestamp
+		//}
+		if err := group.recordFlv.WriteRaw(rtmpBytes.Raw); err != nil {
+			Log.Errorf("[%s] record flv write error. err=%+v", group.UniqueKey, err)
 		}
 	}
 
