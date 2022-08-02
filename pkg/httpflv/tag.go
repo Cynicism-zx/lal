@@ -87,7 +87,7 @@ func (tag *Tag) ModTagTimestamp(timestamp uint32) {
 	tag.Raw[7] = byte(timestamp >> 24)
 }
 
-// PackHttpflvTag 打包一个序列化后的 tag 二进制buffer，包含 tag header，body，prev tag size
+// PackHttpflvTag 打包一个序列化后的 tag 二进制buffer，包含 tag header，body，prev tag size(构造flv tag)
 func PackHttpflvTag(t uint8, timestamp uint32, in []byte) []byte {
 	out := make([]byte, TagHeaderSize+len(in)+PrevTagSizeFieldSize)
 	out[0] = t

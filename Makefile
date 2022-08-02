@@ -31,7 +31,8 @@ all: build test
 
 .PHONY: push
 push:
-	ffmpeg -re -i $(flv) -c:a copy -c:v copy -f flv rtmp://127.0.0.1:1935/live/demo
+	ffmpeg -re -i $(flv) -vf scale=1920:-2 -f flv -vcodec h264 rtmp://127.0.0.1:1935/live/demo
+	# -vf scale=1920:-2 改为自定义分辨率推流
 .PHONY: pull
 pull:
 	ffplay rtmp://127.0.0.1/live/demo
